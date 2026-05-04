@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsNotEmpty, Min, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrderItemDto } from './order-item.dto';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class CreateOrderDto {
     @ApiProperty({ example: 1, description: 'ID da data de encomenda' })
@@ -16,16 +17,19 @@ export class CreateOrderDto {
 
     @ApiProperty({ example: 'Sem cebola', description: 'Observações do pedido', required: false })
     @IsOptional()
+    @Sanitized('multiline')
     @IsString()
     observacoes?: string;
 
     @ApiProperty({ example: 'pix', description: 'Forma de pagamento', required: false })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     formaPagamento?: string;
 
     @ApiProperty({ example: 'entrega', description: 'Tipo de entrega', required: false })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     tipoEntrega?: string;
 
@@ -43,6 +47,7 @@ export class CreateOrderDto {
 
     @ApiProperty({ example: 'Condomínio X', description: 'Nome do endereço especial', required: false })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     enderecoEspecialNome?: string;
 

@@ -7,6 +7,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 /**
  * Item de parada na rota (espelha o JSON em nomesParadas).
@@ -14,18 +15,22 @@ import {
  * caso contrário o class-validator remove todas as chaves dos objetos do array.
  */
 export class RotaParadaDto {
+  @Sanitized('plain')
   @IsString()
   address: string;
 
   @IsOptional()
+  @Sanitized('plain')
   @IsString()
   name?: string;
 
   @IsOptional()
+  @Sanitized('plain')
   @IsString()
   fullAddress?: string;
 
   @IsOptional()
+  @Sanitized('plain', 16)
   @IsString()
   cep?: string;
 
@@ -51,6 +56,7 @@ export class RotaParadaDto {
   longitude?: number;
 
   @IsOptional()
+  @Sanitized('plain', 32)
   @IsString()
   arrivalTime?: string;
 
@@ -60,6 +66,7 @@ export class RotaParadaDto {
   serviceStopSeconds?: number;
 
   @IsOptional()
+  @Sanitized('plain', 32)
   @IsString()
   routeDepartureTime?: string;
 }

@@ -1,15 +1,18 @@
 import { IsString, IsOptional, IsBoolean, IsIn, IsInt, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class UserFilterDto {
     @ApiPropertyOptional({ example: 'João', description: 'Busca por nome ou e-mail' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     search?: string;
 
     @ApiPropertyOptional({ example: 'user', enum: ['admin', 'user'], description: 'Filtrar por role' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     @IsIn(['admin', 'user'])
     role?: string;

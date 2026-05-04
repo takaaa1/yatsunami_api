@@ -1,6 +1,7 @@
 import { IsNotEmpty, IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export enum DiscountType {
     FIXED = 'fixed',
@@ -42,11 +43,13 @@ export class CreateSaleItemDto {
 export class CreateSaleDto {
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('plain', 64)
     @IsString()
     usuarioId?: string;
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('multiline')
     @IsString()
     observacoes?: string;
 

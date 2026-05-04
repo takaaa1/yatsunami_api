@@ -1,13 +1,16 @@
 import { IsEmail, IsString, MinLength, IsOptional, IsBoolean, IsIn } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class LoginDto {
     @ApiProperty({ example: 'user@example.com', description: 'E-mail do usuário' })
+    @Sanitized('email')
     @IsEmail({}, { message: 'Email inválido' })
     email: string;
 
     @ApiProperty({ example: '123456', minLength: 6, description: 'Senha do usuário' })
+    @Sanitized('minimal')
     @IsString()
     @MinLength(6, { message: 'Senha deve ter no mínimo 6 caracteres' })
     password: string;
@@ -20,39 +23,47 @@ export class LoginDto {
 
 export class RegisterDto {
     @ApiProperty({ example: 'João Silva', description: 'Nome completo' })
+    @Sanitized('plain')
     @IsString({ message: 'Nome é obrigatório' })
     nome: string;
 
     @ApiProperty({ example: 'joao@example.com', description: 'E-mail do usuário' })
+    @Sanitized('email')
     @IsEmail({}, { message: 'Email inválido' })
     email: string;
 
     @ApiProperty({ example: '123456', minLength: 6, description: 'Senha' })
+    @Sanitized('minimal')
     @IsString()
     @MinLength(6, { message: 'Senha deve ter no mínimo 6 caracteres' })
     password: string;
 
     @ApiPropertyOptional({ example: '11999998888', description: 'Telefone' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     telefone?: string;
 
     @ApiProperty({ example: 'dark', enum: ['light', 'dark', 'system'], description: 'Tema inicial' })
+    @Sanitized('plain')
     @IsString()
     tema: string;
 
     @ApiProperty({ example: 'pt-BR', enum: ['pt-BR', 'ja-JP'], description: 'Idioma inicial' })
+    @Sanitized('plain')
     @IsString()
     idioma: string;
 }
 
 export class ChangePasswordDto {
     @ApiProperty({ example: 'senhaAtual123', minLength: 6, description: 'Senha atual' })
+    @Sanitized('minimal')
     @IsString()
     @MinLength(6)
     currentPassword: string;
 
     @ApiProperty({ example: 'novaSenha456', minLength: 6, description: 'Nova senha' })
+    @Sanitized('minimal')
     @IsString()
     @MinLength(6)
     newPassword: string;
@@ -60,16 +71,19 @@ export class ChangePasswordDto {
 
 export class ForgotPasswordDto {
     @ApiProperty({ example: 'user@example.com', description: 'E-mail para redefinição de senha' })
+    @Sanitized('email')
     @IsEmail()
     email: string;
 }
 
 export class VerifyCodeDto {
     @ApiProperty({ example: 'user@example.com', description: 'E-mail do usuário' })
+    @Sanitized('email')
     @IsEmail()
     email: string;
 
     @ApiProperty({ example: '123456', description: 'Código de 6 dígitos enviado por e-mail' })
+    @Sanitized('plain', 32)
     @IsString()
     @MinLength(6)
     codigo: string;
@@ -77,15 +91,18 @@ export class VerifyCodeDto {
 
 export class ResetPasswordDto {
     @ApiProperty({ example: 'user@example.com', description: 'E-mail do usuário' })
+    @Sanitized('email')
     @IsEmail()
     email: string;
 
     @ApiProperty({ example: '123456', description: 'Código de 6 dígitos validado' })
+    @Sanitized('plain', 32)
     @IsString()
     @MinLength(6)
     codigo: string;
 
     @ApiProperty({ example: 'novaSenha456', minLength: 6, description: 'Nova senha' })
+    @Sanitized('minimal')
     @IsString()
     @MinLength(6, { message: 'Senha deve ter no mínimo 6 caracteres' })
     newPassword: string;
@@ -94,31 +111,37 @@ export class ResetPasswordDto {
 export class UpdateProfileDto {
     @ApiPropertyOptional({ example: 'João Silva', description: 'Nome completo' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     nome?: string;
 
     @ApiPropertyOptional({ example: '11999998888', description: 'Telefone', nullable: true })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     telefone?: string | null;
 
     @ApiPropertyOptional({ example: 'dark', enum: ['light', 'dark', 'system'], description: 'Tema do app' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     tema?: string;
 
     @ApiPropertyOptional({ example: 'pt-BR', enum: ['pt-BR', 'ja-JP'], description: 'Idioma' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     idioma?: string;
 
     @ApiPropertyOptional({ example: '123.456.789-00', description: 'CPF ou CNPJ', nullable: true })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     cpfCnpj?: string | null;
 
     @ApiPropertyOptional({ example: 'Preferência por entrega sem contato', description: 'Observações', nullable: true })
     @IsOptional()
+    @Sanitized('multiline')
     @IsString()
     observacoes?: string | null;
 
@@ -144,11 +167,13 @@ export class UpdateProfileDto {
 
     @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg', description: 'URL do avatar', nullable: true })
     @IsOptional()
+    @Sanitized('plain', 2048)
     @IsString()
     avatarUrl?: string | null;
 
     @ApiPropertyOptional({ example: 'google_maps', enum: ['google_maps', 'waze'], description: 'App de navegação preferido nas rotas' })
     @IsOptional()
+    @Sanitized('plain')
     @IsString()
     @IsIn(['google_maps', 'waze'], { message: 'appNavegacaoPreferido deve ser google_maps ou waze' })
     appNavegacaoPreferido?: string;

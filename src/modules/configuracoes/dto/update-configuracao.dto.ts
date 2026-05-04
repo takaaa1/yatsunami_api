@@ -1,5 +1,6 @@
 import { IsString, IsOptional, IsEnum, IsNumber, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export enum TipoChavePix {
     CPF = 'cpf',
@@ -13,6 +14,7 @@ export enum TipoChavePix {
 export class UpdateConfiguracaoDto {
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('plain', 128)
     @IsString()
     chavePix?: string;
 
@@ -23,12 +25,14 @@ export class UpdateConfiguracaoDto {
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('plain', 25)
     @IsString()
     @MaxLength(25)
     nomeRecebedor?: string;
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('plain', 15)
     @IsString()
     @MaxLength(15)
     cidadeRecebedor?: string;

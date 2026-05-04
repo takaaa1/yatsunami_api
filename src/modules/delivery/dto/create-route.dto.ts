@@ -8,16 +8,20 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class CreateRouteDestinationDto {
+  @Sanitized('plain')
   @IsString()
   address: string;
 
   @IsOptional()
+  @Sanitized('plain')
   @IsString()
   fullAddress?: string;
 
   @IsOptional()
+  @Sanitized('plain', 16)
   @IsString()
   cep?: string;
 
@@ -29,6 +33,7 @@ export class CreateRouteDestinationDto {
   @IsNumber()
   longitude?: number;
 
+  @Sanitized('plain')
   @IsString()
   name: string;
 
@@ -50,6 +55,7 @@ export class CreateRouteDestinationDto {
   serviceStopSeconds?: number;
 
   @IsOptional()
+  @Sanitized('plain', 32)
   @IsString()
   routeDepartureTime?: string;
 }
@@ -64,10 +70,12 @@ export class CreateRouteDto {
   destinations: CreateRouteDestinationDto[];
 
   @IsOptional()
+  @Sanitized('plain')
   @IsString()
   origin?: string;
 
   @IsOptional()
+  @Sanitized('plain', 32)
   @IsString()
   departureTime?: string;
 

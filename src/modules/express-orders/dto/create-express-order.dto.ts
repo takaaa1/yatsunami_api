@@ -1,5 +1,6 @@
 import { IsArray, IsDateString, IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 class CreateExpressOrderItemDto {
   @IsInt()
@@ -20,6 +21,7 @@ export class CreateExpressOrderDto {
   itens: CreateExpressOrderItemDto[];
 
   @IsOptional()
+  @Sanitized('multiline')
   @IsString()
   observacoes?: string;
 

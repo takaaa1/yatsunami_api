@@ -2,6 +2,7 @@ import { IsNumber, IsOptional, IsBoolean, Min, ValidateNested, IsString, IsUrl, 
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { I18nStringDto } from '../../../common/dto/i18n-string.dto';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class CreateVariedadeDto {
     @ApiProperty({ type: I18nStringDto })
@@ -33,6 +34,7 @@ export class CreateVariedadeDto {
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Sanitized('plain', 2048)
     @IsString()
     @ValidateIf((o) => o.imagem !== '' && o.imagem !== null && o.imagem !== undefined)
     @IsUrl()

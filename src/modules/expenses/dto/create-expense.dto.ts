@@ -1,9 +1,11 @@
 import { IsNotEmpty, IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsDateString, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class CreateExpenseItemDto {
     @ApiProperty()
+    @Sanitized('multiline')
     @IsString()
     @IsNotEmpty()
     descricao: string;
@@ -26,8 +28,9 @@ export class CreateExpenseItemDto {
 
 export class CreateExpenseDto {
     @ApiProperty()
-    @IsString()
     @IsOptional()
+    @Sanitized('plain')
+    @IsString()
     nomeEstabelecimento?: string;
 
     @ApiProperty()
@@ -56,13 +59,15 @@ export class CreateExpenseDto {
     foiEditada?: boolean;
 
     @ApiProperty()
-    @IsString()
     @IsOptional()
+    @Sanitized('plain', 2048)
+    @IsString()
     urlQrcode?: string;
 
     @ApiProperty()
-    @IsString()
     @IsOptional()
+    @Sanitized('multiline')
+    @IsString()
     xmlRaw?: string;
 
     @ApiProperty({ type: [CreateExpenseItemDto] })
@@ -74,6 +79,7 @@ export class CreateExpenseDto {
 
 export class ParseQrDto {
     @ApiProperty()
+    @Sanitized('plain', 2048)
     @IsString()
     @IsNotEmpty()
     url: string;

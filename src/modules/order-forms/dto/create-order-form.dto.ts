@@ -1,6 +1,7 @@
 import { IsBoolean, IsDateString, IsOptional, IsString, IsArray, ValidateNested, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 class SelectionDto {
     @ApiProperty()
@@ -45,8 +46,9 @@ export class CreateOrderFormDto {
     selections?: SelectionDto[];
 
     @ApiProperty({ description: 'Observações internas', required: false })
-    @IsString()
     @IsOptional()
+    @Sanitized('multiline')
+    @IsString()
     observacoes?: string;
 
     @ApiProperty({ description: 'Endereços especiais (JSON stringified)', required: false })

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsNotEmpty, IsString, Min } from 'class-validator';
+import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 export class OrderItemDto {
     @ApiProperty({ example: 1, description: 'ID do produto' })
@@ -26,6 +27,7 @@ export class OrderItemDto {
 
     @ApiProperty({ example: 'Sem cebola', description: 'Observações do item', required: false })
     @IsOptional()
+    @Sanitized('multiline')
     @IsString()
     observacoes?: string;
 }
