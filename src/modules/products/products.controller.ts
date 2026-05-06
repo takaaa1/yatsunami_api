@@ -92,37 +92,15 @@ export class ProductsController {
                     type: 'string',
                     format: 'binary',
                 },
-                model: {
-                    type: 'string',
-                    example: 'isnet-general-use',
-                },
-                alphaMatting: {
-                    type: 'boolean',
-                    example: false,
-                },
             },
         },
     })
     @ApiOperation({ summary: 'Generate product image preview without background (rembg)' })
-    async removeBackgroundPreview(
-        @UploadedFile() file: Express.Multer.File,
-        @Body('model') model?: string,
-        @Body('alphaMatting') alphaMatting?: string | boolean,
-    ) {
+    async removeBackgroundPreview(@UploadedFile() file: Express.Multer.File) {
         if (!file?.buffer) {
             throw new BadRequestException('Arquivo ausente ou corpo multipart inválido (campo "file").');
         }
-        const parsedAlphaMatting =
-            typeof alphaMatting === 'boolean'
-                ? alphaMatting
-                : typeof alphaMatting === 'string'
-                    ? alphaMatting.toLowerCase() === 'true' || alphaMatting === '1'
-                    : undefined;
-
-        const url = await this.productsService.generateBackgroundRemovedPreview(file, {
-            model,
-            alphaMatting: parsedAlphaMatting,
-        });
+        const url = await this.productsService.generateBackgroundRemovedPreview(file);
         return { url };
     }
 }
