@@ -181,15 +181,7 @@ export class ProductsService {
 
     private runCommand(command: string, args: string[]): Promise<void> {
         return new Promise((resolve, reject) => {
-            const rembgCacheDir = process.env.NUMBA_CACHE_DIR?.trim() || path.resolve(process.cwd(), '.cache', 'numba');
-            const child = spawn(command, args, {
-                stdio: 'pipe',
-                env: {
-                    ...process.env,
-                    NUMBA_CACHE_DIR: rembgCacheDir,
-                    HOME: process.env.HOME || process.cwd(),
-                },
-            });
+            const child = spawn(command, args, { stdio: 'pipe' });
             let stderr = '';
 
             child.stderr.on('data', (chunk) => {
@@ -257,8 +249,6 @@ export class ProductsService {
         const outputStoragePath = `previews/${randomUUID()}.png`;
 
         try {
-            const rembgCacheDir = process.env.NUMBA_CACHE_DIR?.trim() || path.resolve(process.cwd(), '.cache', 'numba');
-            await fs.mkdir(rembgCacheDir, { recursive: true });
             await fs.writeFile(inputPath, file.buffer);
             await this.runRembg(inputPath, outputPath);
 
