@@ -203,21 +203,11 @@ export class ProductsService {
     }
 
     private async runRembg(inputPath: string, outputPath: string): Promise<void> {
-        const rembgBinFromEnv = process.env.REMBG_BIN?.trim();
-        const cwdVenvRembg = path.resolve(process.cwd(), '.venv', 'bin', 'rembg');
-
-        const attempts: Array<{ command: string; args: string[] }> = [];
-        const tryDirectRembg = (cmd: string | undefined) => {
-            if (!cmd) return;
-            attempts.push({ command: cmd, args: ['i', inputPath, outputPath] });
-        };
-
-        // Prioridade: binário explícito/venv local -> PATH -> python module fallback.
-        tryDirectRembg(rembgBinFromEnv);
-        tryDirectRembg(cwdVenvRembg);
-        tryDirectRembg('rembg');
-        attempts.push({ command: 'python', args: ['-m', 'rembg', 'i', inputPath, outputPath] });
-        attempts.push({ command: 'python3', args: ['-m', 'rembg', 'i', inputPath, outputPath] });
+        const attempts: Array<{ command: string; args: string[] }> = [
+            { command: 'rembg', args: ['i', inputPath, outputPath] },
+            { command: 'python', args: ['-m', 'rembg', 'i', inputPath, outputPath] },
+            { command: 'python3', args: ['-m', 'rembg', 'i', inputPath, outputPath] },
+        ];
 
         let lastError: unknown = null;
         for (const attempt of attempts) {
