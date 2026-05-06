@@ -4,6 +4,10 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { StorageService } from '../../config/storage.service';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { spawn } from 'child_process';
 
 import { Prisma } from '@prisma/client';
 
@@ -173,5 +177,75 @@ export class ProductsService {
         await this.storageService.uploadFile('produtos', fileName, file.buffer, file.mimetype);
 
         return this.storageService.getPublicUrl('produtos', fileName);
+    }
+
+    private runCommand(command: string, args: string[]): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const child = spawn(command, args, { stdio: 'pipe' });
+            let stderr = '';
+
+            child.stderr.on('data', (chunk) => {
+                stderr += chunk.toString();
+            });
+
+            child.on('error', (error) => {
+                reject(error);
+            });
+
+            child.on('close', (code) => {
+                if (code === 0) {
+                    resolve();
+                    return;
+                }
+                reject(new Error(stderr || `Comando "${command}" terminou com código ${code}`));
+            });
+        });
+    }
+
+    private async runRembg(inputPath: string, outputPath: string): Promise<void> {
+        const attempts: Array<{ command: string; args: string[] }> = [
+            { command: 'rembg', args: ['i', inputPath, outputPath] },
+            { command: 'python', args: ['-m', 'rembg', 'i', inputPath, outputPath] },
+            { command: 'python3', args: ['-m', 'rembg', 'i', inputPath, outputPath] },
+        ];
+
+        let lastError: unknown = null;
+        for (const attempt of attempts) {
+            try {
+                await this.runCommand(attempt.command, attempt.args);
+                return;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        throw new Error(
+            `Falha ao executar rembg. Instale o rembg no servidor (CLI ou python module). Detalhe: ${
+                (lastError as Error)?.message || 'desconhecido'
+            }`,
+        );
+    }
+
+    async generateBackgroundRemovedPreview(file: Express.Multer.File): Promise<string> {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yatsunami-rembg-'));
+        const inputPath = path.join(tmpDir, `input-${randomUUID()}.png`);
+        const outputPath = path.join(tmpDir, `output-${randomUUID()}.png`);
+        const outputStoragePath = `previews/${randomUUID()}.png`;
+
+        try {
+            await fs.writeFile(inputPath, file.buffer);
+            await this.runRembg(inputPath, outputPath);
+
+            const outputBuffer = await fs.readFile(outputPath);
+            await this.storageService.uploadFile('produtos', outputStoragePath, outputBuffer, 'image/png');
+
+            return this.storageService.getPublicUrl('produtos', outputStoragePath);
+        } finally {
+            await Promise.allSettled([
+                fs.unlink(inputPath),
+                fs.unlink(outputPath),
+            ]);
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
     }
 }

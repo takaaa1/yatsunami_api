@@ -77,4 +77,30 @@ export class ProductsController {
         const url = await this.productsService.uploadImage(file);
         return { url };
     }
+
+    @Post('remove-bg-preview')
+    @ApiBearerAuth('JWT')
+    @UseGuards(AuthGuard('jwt'), RolesGuard)
+    @Roles('admin')
+    @UseInterceptors(FileInterceptor('file'))
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+        },
+    })
+    @ApiOperation({ summary: 'Generate product image preview without background (rembg)' })
+    async removeBackgroundPreview(@UploadedFile() file: Express.Multer.File) {
+        if (!file?.buffer) {
+            throw new BadRequestException('Arquivo ausente ou corpo multipart inválido (campo "file").');
+        }
+        const url = await this.productsService.generateBackgroundRemovedPreview(file);
+        return { url };
+    }
 }
