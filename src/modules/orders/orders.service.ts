@@ -49,11 +49,13 @@ export class OrdersService {
             throw new BadRequestException('O horário de retirada deve estar entre 08:00 e 14:59');
         }
 
-        const pickupDate = new Date(dataEntrega);
-        // Keep pickup time in local business timezone context (Sao Paulo),
-        // avoiding UTC conversion that shifts -3h in persisted/displayed values.
-        pickupDate.setHours(hours, minutes, 0, 0);
-        return pickupDate;
+        // Build the pickup instant explicitly in Sao Paulo timezone (-03:00),
+        // independent of server timezone. This matches route ETA persistence behavior
+        // (store an absolute instant in timestamptz).
+        const deliveryDatePart = dataEntrega.toISOString().split('T')[0];
+        const hh = String(hours).padStart(2, '0');
+        const mm = String(minutes).padStart(2, '0');
+        return new Date(`${deliveryDatePart}T${hh}:${mm}:00-03:00`);
     }
 
     private async calculateDeliveryFee(subtotal: number, tipoEntrega?: string, enderecoEspecialNome?: string) {
