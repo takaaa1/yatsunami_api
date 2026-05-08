@@ -111,12 +111,11 @@ export class OrdersService {
         const existingOrder = await this.prisma.pedidoEncomenda.findFirst({
             where: {
                 usuarioId: userId,
-                dataEncomendaId: dataEncomendaId,
-                statusPagamento: { not: 'cancelado' } // Cancelled orders don't count
+                dataEncomendaId: dataEncomendaId
             }
         });
 
-        if (existingOrder) {
+        if (existingOrder && existingOrder.statusPagamento !== 'cancelado') {
             throw new BadRequestException('Você já possui um pedido para esta data de entrega. Edite o pedido existente ou cancele-o para criar um novo.');
         }
 
@@ -193,8 +192,51 @@ export class OrdersService {
             if (!existingCode) isUnique = true;
         }
 
-        // Create order with transaction to ensure integrity
+        // Create or reuse cancelled order with transaction to ensure integrity
         const order = await this.prisma.$transaction(async (tx) => {
+            if (existingOrder && existingOrder.statusPagamento === 'cancelado') {
+                await tx.itemPedidoEncomenda.deleteMany({
+                    where: { pedidoId: existingOrder.id }
+                });
+
+                const recycledOrder = await tx.pedidoEncomenda.update({
+                    where: { id: existingOrder.id },
+                    data: {
+                        codigo: codigo,
+                        dataPedido: new Date(),
+                        ...orderData,
+                        horarioEstimadoEntrega: horarioRetiradaDate,
+                        totalValor: totalValor,
+                        taxaEntrega: taxaEntrega,
+                        statusPagamento: statusPagamento,
+                        statusPagamentoAnterior: null,
+                        dataPagamento: null,
+                        confirmadoPor: null,
+                        comprovanteUrl: null,
+                        emEntrega: false,
+                        itens: {
+                            create: processedItens.map(item => ({
+                                produtoId: item.produtoId,
+                                variedadeId: item.variedadeId,
+                                quantidade: item.quantidade,
+                                precoUnitario: item.precoUnitario,
+                            })),
+                        },
+                    },
+                    include: {
+                        usuario: { select: { id: true, nome: true } },
+                        itens: {
+                            include: {
+                                produto: true,
+                                variedade: true,
+                            }
+                        }
+                    }
+                });
+
+                return recycledOrder;
+            }
+
             const newOrder = await tx.pedidoEncomenda.create({
                 data: {
                     usuarioId: userId,
