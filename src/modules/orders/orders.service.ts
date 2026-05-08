@@ -50,7 +50,9 @@ export class OrdersService {
         }
 
         const pickupDate = new Date(dataEntrega);
-        pickupDate.setUTCHours(hours, minutes, 0, 0);
+        // Keep pickup time in local business timezone context (Sao Paulo),
+        // avoiding UTC conversion that shifts -3h in persisted/displayed values.
+        pickupDate.setHours(hours, minutes, 0, 0);
         return pickupDate;
     }
 
