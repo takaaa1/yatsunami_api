@@ -159,6 +159,8 @@ export class NotificationsService {
         pedidoEncomendaId?: number;
         tipo?: string;
     }) {
+        const notificacaoIdByUserId = new Map<string, string>();
+
         // Criar notificações na Inbox individualmente
         for (const id of data.usuarioIds) {
             // Deduplicar antes de criar
@@ -170,7 +172,7 @@ export class NotificationsService {
                 data.dataEncomendaId,
             );
 
-            await this.prisma.notificacao.create({
+            const notificacao = await this.prisma.notificacao.create({
                 data: {
                     usuarioId: id,
                     titulo: `${data.chave}.title`,
@@ -182,6 +184,8 @@ export class NotificationsService {
                     tipo: data.tipo || 'admin',
                 },
             });
+
+            notificacaoIdByUserId.set(id, notificacao.id);
         }
 
         // Buscar tokens e idiomas para envio push
@@ -206,6 +210,7 @@ export class NotificationsService {
                     title,
                     body: message,
                     data: {
+                        notificacaoId: notificacaoIdByUserId.get(usuario.id),
                         dataEncomendaId: data.dataEncomendaId,
                         pedidoDiretoId: data.pedidoDiretoId,
                         pedidoEncomendaId: data.pedidoEncomendaId,
