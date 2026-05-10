@@ -19,13 +19,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     constructor(private readonly deliveryService: DeliveryService) { }
 
-    handleConnection(client: Socket) {
-        // console.log(`Client connected: ${client.id}`);
-    }
+    handleConnection(_client: Socket) { }
 
-    handleDisconnect(client: Socket) {
-        // console.log(`Client disconnected: ${client.id}`);
-    }
+    handleDisconnect(_client: Socket) { }
 
     @SubscribeMessage('updateLocation')
     async handleLocationUpdate(

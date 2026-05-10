@@ -711,7 +711,7 @@ export class DeliveryService {
         // For now, return based on time only
         return {
             isActive: diffSeconds < ACTIVE_THRESHOLD_SECONDS,
-            userId: null, // TODO: Store userId in location table for proper tracking
+            userId: null, // entregadorLocalizacao não armazena userId; requer migração de schema para rastreio por entregador.
             lastUpdate: location.atualizadoEm,
             secondsAgo: Math.floor(diffSeconds)
         };

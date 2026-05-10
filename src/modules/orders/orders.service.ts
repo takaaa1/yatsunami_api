@@ -522,10 +522,8 @@ export class OrdersService {
             throw new NotFoundException(`Pedido com ID ${id} não encontrado`);
         }
 
-        // Ensure user owns the order (or is admin - implementing basic owner check for now)
-        // TODO: Add admin check logic if needed
+        // Ensure user owns the order or is an admin.
         if (order.usuarioId !== userId) {
-            // Find if user is admin
             const user = await this.prisma.usuario.findUnique({ where: { id: userId } });
             if (user?.role !== 'admin') {
                 throw new NotFoundException(`Pedido com ID ${id} não encontrado`); // Don't leak existence
