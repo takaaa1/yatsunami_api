@@ -46,6 +46,9 @@ git reset --hard "origin/$BRANCH"
 log "npm ci…"
 npm ci
 
+log "prisma generate…"
+npx prisma generate
+
 log "npm run build…"
 npm run build
 
@@ -58,9 +61,9 @@ fi
 
 restart_pm2() {
   if [ -n "$PM2_SUDO_USER" ]; then
-    sudo -u "$PM2_SUDO_USER" env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME" --update-env
+    sudo -u "$PM2_SUDO_USER" env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME"
   else
-    env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME" --update-env
+    env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME"
   fi
 }
 
