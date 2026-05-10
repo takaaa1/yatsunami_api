@@ -82,7 +82,13 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     // Notify clients that sharing was started or stopped
-    broadcastSharingStatus(formId: number, active: boolean) {
-        this.server.to(`tracking_${formId}`).emit('sharingStatus', { formId, active });
+    broadcastSharingStatus(formId: number, active: boolean, meta?: { userName?: string | null; userId?: string | null; courierId?: number }) {
+        this.server.to(`tracking_${formId}`).emit('sharingStatus', {
+            formId,
+            active,
+            userName: meta?.userName ?? null,
+            userId: meta?.userId ?? null,
+            courierId: meta?.courierId,
+        });
     }
 }

@@ -77,7 +77,11 @@ export class DeliveryController {
         }
 
         const result = await this.deliveryService.startRouteSharing(formId, courierId, userId);
-        this.trackingGateway.broadcastSharingStatus(formId, true);
+        this.trackingGateway.broadcastSharingStatus(formId, true, {
+            userName: result.userName,
+            userId: result.userId,
+            courierId,
+        });
         return result;
     }
 
@@ -87,7 +91,7 @@ export class DeliveryController {
         @Body('courierId') courierId?: number,
     ) {
         const result = await this.deliveryService.stopRouteSharing(formId, courierId);
-        this.trackingGateway.broadcastSharingStatus(formId, false);
+        this.trackingGateway.broadcastSharingStatus(formId, false, { courierId });
         return result;
     }
 

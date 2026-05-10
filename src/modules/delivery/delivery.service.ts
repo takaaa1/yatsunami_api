@@ -765,7 +765,16 @@ export class DeliveryService {
 
         this.logger.debug(`Route sharing started for form ${formId}, courier ${courierId || 'all'}, by user ${userId || 'unknown'}, orders: ${orderIds.length}`);
 
-        return { success: true, updatedCount: orderIds.length, courierId, userId };
+        let userName: string | null = null;
+        if (userId) {
+            const user = await this.prisma.usuario.findUnique({
+                where: { id: userId },
+                select: { nome: true },
+            });
+            userName = user?.nome ?? null;
+        }
+
+        return { success: true, updatedCount: orderIds.length, courierId, userId, userName };
     }
 
     async stopRouteSharing(formId: number, courierId?: number) {
