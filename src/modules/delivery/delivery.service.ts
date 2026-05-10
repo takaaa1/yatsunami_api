@@ -593,7 +593,8 @@ export class DeliveryService {
                     latitude,
                     longitude,
                     atualizadoEm: new Date(),
-                    courierId // Update courierId just in case it was null before but now we know it
+                    courierId, // Update courierId just in case it was null before but now we know it
+                    ...(userId && { userId }),
                 }
             });
         }
@@ -603,7 +604,8 @@ export class DeliveryService {
                 formId,
                 latitude,
                 longitude,
-                courierId
+                courierId,
+                userId,
             },
         });
     }
@@ -705,13 +707,9 @@ export class DeliveryService {
         const lastUpdate = new Date(location.atualizadoEm);
         const diffSeconds = (now.getTime() - lastUpdate.getTime()) / 1000;
 
-        // We store the userId in a comment or we need to track it separately
-        // For now, we'll use a separate tracking table or check
-        // Since we don't have userId in entregadorLocalizacao, we'll need to add it
-        // For now, return based on time only
         return {
             isActive: diffSeconds < ACTIVE_THRESHOLD_SECONDS,
-            userId: null, // entregadorLocalizacao não armazena userId; requer migração de schema para rastreio por entregador.
+            userId: location.userId ?? null,
             lastUpdate: location.atualizadoEm,
             secondsAgo: Math.floor(diffSeconds)
         };

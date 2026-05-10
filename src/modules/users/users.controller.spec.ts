@@ -43,7 +43,7 @@ describe('UsersController', () => {
       mockUsersService.findAll.mockResolvedValue([mockUser]);
       const result = await controller.findAll({});
       expect(result).toEqual([mockUser]);
-      expect(mockUsersService.findAll).toHaveBeenCalledWith({});
+      expect(mockUsersService.findAll).toHaveBeenCalledWith({}, 0, 10);
     });
   });
 

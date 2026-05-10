@@ -10,6 +10,7 @@
 #   PM2_APP_NAME   — nome no PM2 (default: yatsunami-api)
 #   PM2_HOME       — PM2_HOME (default: /var/www/yatsunami/.pm2)
 #   PM2_SUDO_USER  — se definido, executa pm2 como esse utilizador (ex.: yatsunami)
+#   SKIP_MIGRATIONS — se "true", pula o prisma migrate deploy
 
 set -euo pipefail
 
@@ -18,6 +19,7 @@ BRANCH="${DEPLOY_BRANCH:-main}"
 PM2_NAME="${PM2_APP_NAME:-yatsunami-api}"
 PM2_HOME_VAR="${PM2_HOME:-/var/www/yatsunami/.pm2}"
 PM2_SUDO_USER="${PM2_SUDO_USER:-}"
+SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-false}"
 
 log() { echo "[$(date -Iseconds)] $*"; }
 
@@ -46,6 +48,13 @@ npm ci
 
 log "npm run build…"
 npm run build
+
+if [ "$SKIP_MIGRATIONS" != "true" ]; then
+  log "prisma migrate deploy…"
+  npx prisma migrate deploy
+else
+  log "Migrations ignoradas (SKIP_MIGRATIONS=true)."
+fi
 
 restart_pm2() {
   if [ -n "$PM2_SUDO_USER" ]; then
