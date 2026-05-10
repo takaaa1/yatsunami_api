@@ -58,9 +58,9 @@ fi
 
 restart_pm2() {
   if [ -n "$PM2_SUDO_USER" ]; then
-    sudo -u "$PM2_SUDO_USER" env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME"
+    sudo -u "$PM2_SUDO_USER" env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME" --update-env
   else
-    env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME"
+    env PM2_HOME="$PM2_HOME_VAR" pm2 restart "$PM2_NAME" --update-env
   fi
 }
 
