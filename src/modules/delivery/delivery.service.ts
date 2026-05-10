@@ -570,7 +570,9 @@ export class DeliveryService {
     async updateLocation(updateLocationDto: UpdateLocationDto) {
         const { formId, latitude, longitude, courierId, userId } = updateLocationDto;
 
-        this.logger.warn(`[updateLocation] formId=${formId} courierId=${courierId} userId=${JSON.stringify(userId)} type=${typeof userId}`);
+        if (userId) {
+            this.logger.debug(`Location update from user ${userId} for form ${formId}, courier route ${courierId || 1}`);
+        }
 
         const whereClause: any = { formId };
         if (courierId !== undefined) {
@@ -704,9 +706,21 @@ export class DeliveryService {
         const lastUpdate = new Date(location.atualizadoEm);
         const diffSeconds = (now.getTime() - lastUpdate.getTime()) / 1000;
 
+        const isActive = diffSeconds < ACTIVE_THRESHOLD_SECONDS;
+
+        let userName: string | null = null;
+        if (location.userId && isActive) {
+            const user = await this.prisma.usuario.findUnique({
+                where: { id: location.userId },
+                select: { nome: true },
+            });
+            userName = user?.nome ?? null;
+        }
+
         return {
-            isActive: diffSeconds < ACTIVE_THRESHOLD_SECONDS,
+            isActive,
             userId: location.userId ?? null,
+            userName,
             lastUpdate: location.atualizadoEm,
             secondsAgo: Math.floor(diffSeconds)
         };
