@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsEnum, IsDate } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { Sanitized } from '../../../common/decorators/sanitized.decorator';
@@ -67,6 +67,12 @@ export class CreateSaleDto {
     @IsOptional()
     @IsNumber()
     taxaEntrega?: number;
+
+    @ApiProperty({ required: false, description: 'Override sale date (defaults to now)' })
+    @IsOptional()
+    @IsDate()
+    @Type(() => Date)
+    data?: Date;
 
     @ApiProperty({ type: [CreateSaleItemDto] })
     @IsArray()

@@ -200,6 +200,15 @@ export class OrderFormsService {
                     AND status_pagamento IN ('pendente', 'bloqueado', 'aguardando_confirmacao')
             `, `auto_${adminUserId || 'system'}`, id);
 
+            // Mark all non-cancelled orders as 'entregue'
+            await this.prisma.pedidoEncomenda.updateMany({
+                where: {
+                    dataEncomendaId: id,
+                    statusPagamento: { notIn: ['cancelado', 'entregue'] },
+                },
+                data: { statusPagamento: 'entregue', emEntrega: false },
+            });
+
             // Create Sales for all non-cancelled orders
             const orders = await this.prisma.pedidoEncomenda.findMany({
                 where: {
@@ -230,6 +239,7 @@ export class OrderFormsService {
                             ? `Formulário #${id} - Pedido ${order.codigo || order.id} | Taxa de entrega: R$ ${deliveryFee.toFixed(2).replace('.', ',')}`
                             : `Formulário #${id} - Pedido ${order.codigo || order.id}`,
                         taxaEntrega: deliveryFee > 0 ? deliveryFee : undefined,
+                        data: order.horarioEstimadoEntrega ?? undefined,
                         itens: order.itens.map(item => ({
                             produtoId: item.produtoId,
                             variedadeId: item.variedadeId || undefined,
