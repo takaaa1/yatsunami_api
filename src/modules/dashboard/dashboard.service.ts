@@ -1,6 +1,65 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
+/** Mesma regra que `getFormStatus` em `yatsunami_app/app/(tabs)/index.tsx` */
+function classifyProximoPedidoStatus(
+    form: {
+        ativo: boolean;
+        concluido: boolean;
+        dataInicioPedido: Date | null;
+        dataLimitePedido: Date;
+    },
+    now: Date,
+): 'aberto' | 'emBreve' | 'encerrado' {
+    const deadline = new Date(form.dataLimitePedido);
+    const startDate = form.dataInicioPedido ? new Date(form.dataInicioPedido) : null;
+    if (!form.ativo || form.concluido || now > deadline) return 'encerrado';
+    if (startDate && now < startDate) return 'emBreve';
+    return 'aberto';
+}
+
+function deliveryDateStartOfDayTs(dataEntregaYmd: string): number {
+    const day = dataEntregaYmd.split('T')[0];
+    const [y, m, d] = day.split('-').map(Number);
+    return new Date(y, m - 1, d).getTime();
+}
+
+type ProximoPedidoDto = {
+    id: number;
+    data_entrega: string;
+    data_inicio_pedido: Date | null;
+    data_limite_pedido: Date;
+    observacoes: string | null;
+    ativo: boolean;
+    concluido: boolean;
+};
+
+/**
+ * Aberto / em breve: data de entrega futura mais próxima de hoje primeiro (asc).
+ * Encerrado: data de entrega passada mais próxima de hoje primeiro (mais recente no passado = desc).
+ * Lista final: abertos + em breve, depois encerrados; limitado a `max`.
+ */
+function sortProximosPedidosForUser(items: ProximoPedidoDto[], now: Date, max: number): ProximoPedidoDto[] {
+    const openLike: ProximoPedidoDto[] = [];
+    const closed: ProximoPedidoDto[] = [];
+    for (const item of items) {
+        const st = classifyProximoPedidoStatus(
+            {
+                ativo: item.ativo,
+                concluido: item.concluido,
+                dataInicioPedido: item.data_inicio_pedido,
+                dataLimitePedido: item.data_limite_pedido,
+            },
+            now,
+        );
+        if (st === 'encerrado') closed.push(item);
+        else openLike.push(item);
+    }
+    openLike.sort((a, b) => deliveryDateStartOfDayTs(a.data_entrega) - deliveryDateStartOfDayTs(b.data_entrega));
+    closed.sort((a, b) => deliveryDateStartOfDayTs(b.data_entrega) - deliveryDateStartOfDayTs(a.data_entrega));
+    return [...openLike, ...closed].slice(0, max);
+}
+
 @Injectable()
 export class DashboardService {
     constructor(private prisma: PrismaService) { }
@@ -169,26 +228,44 @@ export class DashboardService {
         }
 
         // 4. Próximos pedidos (forms ativos + recently closed)
-        const proximosPedidosRaw = await this.prisma.dataEncomenda.findMany({
-            where: {
-                OR: [
-                    { ativo: true },
-                    { dataLimitePedido: { gte: sevenDaysAgo } },
-                ],
-            },
-            orderBy: { dataEntrega: 'asc' },
-            take: 3,
-        });
+        const proximosWhere = {
+            OR: [
+                { ativo: true },
+                { dataLimitePedido: { gte: sevenDaysAgo } },
+            ],
+        };
 
-        const proximosPedidos = proximosPedidosRaw.map(form => ({
+        const [proximosByDeliveryAsc, proximosByDeliveryDesc] = await Promise.all([
+            this.prisma.dataEncomenda.findMany({
+                where: proximosWhere,
+                orderBy: { dataEntrega: 'asc' },
+                take: 40,
+            }),
+            this.prisma.dataEncomenda.findMany({
+                where: proximosWhere,
+                orderBy: { dataEntrega: 'desc' },
+                take: 40,
+            }),
+        ]);
+
+        const mergedById = new Map<number, (typeof proximosByDeliveryAsc)[0]>();
+        for (const row of proximosByDeliveryAsc) mergedById.set(row.id, row);
+        for (const row of proximosByDeliveryDesc) mergedById.set(row.id, row);
+
+        const proximosMapped: ProximoPedidoDto[] = Array.from(mergedById.values()).map(form => ({
             id: form.id,
-            data_entrega: form.dataEntrega instanceof Date ? form.dataEntrega.toISOString().split('T')[0] : form.dataEntrega,
+            data_entrega:
+                form.dataEntrega instanceof Date
+                    ? form.dataEntrega.toISOString().split('T')[0]
+                    : String(form.dataEntrega).split('T')[0],
             data_inicio_pedido: form.dataInicioPedido ?? null,
             data_limite_pedido: form.dataLimitePedido,
             observacoes: form.observacoes ?? null,
             ativo: form.ativo,
             concluido: form.concluido,
         }));
+
+        const proximosPedidos = sortProximosPedidosForUser(proximosMapped, now, 3);
 
         // 5. Últimos pedidos do usuário
         const meusUltimosPedidos = await this.prisma.pedidoEncomenda.findMany({
