@@ -111,13 +111,4 @@ export class OrderFormsController {
     sendNotification(@Param('id', ParseIntPipe) id: number) {
         return this.orderFormsService.sendFormNotification(id);
     }
-
-    @Post(':id/send-notification-test')
-    @ApiBearerAuth('JWT')
-    @UseGuards(AuthGuard('jwt'), RolesGuard)
-    @Roles('admin')
-    @ApiOperation({ summary: 'Teste: enviar notificação deste formulário apenas para a conta logada (inbox + push)' })
-    sendNotificationTest(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.orderFormsService.sendFormNotificationTest(id, adminUserId);
-    }
 }

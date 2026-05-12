@@ -460,20 +460,4 @@ export class OrderFormsService {
 
         return { sent: users.length, pushSent };
     }
-
-    /** Mesmo payload do broadcast, mas só para o admin logado (inbox + push). */
-    async sendFormNotificationTest(id: number, actorUserId: string) {
-        const orderForm = await this.findOne(id);
-        const formattedDate = new Date(orderForm.data_entrega).toLocaleDateString('pt-BR');
-
-        await this.notificationsService.createAndSendNotification({
-            usuarioId: actorUserId,
-            chave: 'notification.newOrderForm',
-            parametros: { data: formattedDate },
-            dataEncomendaId: id,
-            tipo: 'user',
-        });
-
-        return { ok: true as const };
-    }
 }
