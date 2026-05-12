@@ -436,17 +436,21 @@ export class OrderFormsService {
     async sendFormNotification(id: number) {
         const orderForm = await this.findOne(id);
 
-        // Buscar todos os usuários ativos
+        // Clientes e admins ativos (admins também usam o app e precisam do aviso de novo formulário)
         const users = await this.prisma.usuario.findMany({
-            where: { role: 'user' },
+            where: {
+                role: { in: ['user', 'admin'] },
+                ativo: true,
+                email: { not: { endsWith: '@deleted.yatsunami' } },
+            },
             select: { id: true },
         });
 
-        if (users.length === 0) return { sent: 0 };
+        if (users.length === 0) return { sent: 0, pushSent: 0 };
 
         const formattedDate = new Date(orderForm.data_entrega).toLocaleDateString('pt-BR');
 
-        await this.notificationsService.broadcastNotification({
+        const { pushSent } = await this.notificationsService.broadcastNotification({
             usuarioIds: users.map(u => u.id),
             chave: 'notification.newOrderForm',
             parametros: { data: formattedDate },
@@ -454,6 +458,6 @@ export class OrderFormsService {
             tipo: 'user',
         });
 
-        return { sent: users.length };
+        return { sent: users.length, pushSent };
     }
 }

@@ -107,7 +107,7 @@ export class OrderFormsController {
     @ApiBearerAuth('JWT')
     @UseGuards(AuthGuard('jwt'), RolesGuard)
     @Roles('admin')
-    @ApiOperation({ summary: 'Enviar notificação sobre este formulário para todos os usuários' })
+    @ApiOperation({ summary: 'Enviar notificação sobre este formulário para usuários e admins ativos (inbox + push)' })
     sendNotification(@Param('id', ParseIntPipe) id: number) {
         return this.orderFormsService.sendFormNotification(id);
     }

@@ -193,7 +193,7 @@ export class NotificationsService {
             where: {
                 id: { in: data.usuarioIds },
                 receberNotificacoes: true,
-                expoPushToken: { not: null },
+                AND: [{ expoPushToken: { not: null } }, { expoPushToken: { not: '' } }],
             },
             select: { id: true, expoPushToken: true, idioma: true },
         });
@@ -226,13 +226,24 @@ export class NotificationsService {
             const chunks = this.expo.chunkPushNotifications(messages);
             for (const chunk of chunks) {
                 try {
-                    await this.expo.sendPushNotificationsAsync(chunk);
+                    const tickets = await this.expo.sendPushNotificationsAsync(chunk);
+                    for (const ticket of tickets) {
+                        if (ticket.status === 'error') {
+                            this.logger.warn(
+                                `Push broadcast ticket error: ${ticket.message}${ticket.details ? ` — ${JSON.stringify(ticket.details)}` : ''}`,
+                            );
+                        }
+                    }
                 } catch (error) {
                     this.logger.error(`Erro ao enviar broadcast push chunk: ${error}`);
                 }
             }
+        } else if (data.usuarioIds.length > 0) {
+            this.logger.log(
+                `Broadcast sem mensagens push (${data.usuarioIds.length} destinatários na inbox): nenhum token Expo válido com receberNotificacoes=true`,
+            );
         }
 
-        return true;
+        return { pushSent: messages.length };
     }
 }
