@@ -54,4 +54,9 @@ export class CreateOrderFormDto {
     @ApiProperty({ description: 'Endereços especiais (JSON stringified)', required: false })
     @IsOptional()
     enderecos_especiais?: any;
+
+    @ApiProperty({ description: 'Enviar notificação aos usuários quando o formulário abrir', default: true, required: false })
+    @IsBoolean()
+    @IsOptional()
+    notificar_usuarios?: boolean;
 }

@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderFormDto, UpdateOrderFormDto } from './dto';
 import { SalesService } from '../sales/sales.service';
@@ -7,6 +8,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OrderFormsService {
+    private readonly logger = new Logger(OrderFormsService.name);
+
     constructor(
         private prisma: PrismaService,
         private salesService: SalesService,
@@ -23,20 +26,28 @@ export class OrderFormsService {
             concluido: item.concluido,
             observacoes: item.observacoes,
             enderecos_especiais: item.enderecosEspeciais,
+            notificar_usuarios: item.notificarUsuarios,
+            notificacao_enviada_em: item.notificacaoEnviadaEm,
             criado_em: item.criadoEm,
         };
     }
 
     async create(createDto: CreateOrderFormDto) {
+        const notificarUsuarios = createDto.notificar_usuarios ?? true;
+        const dataInicio = createDto.data_inicio_pedido ? new Date(createDto.data_inicio_pedido) : null;
+        // Sem data_inicio_pedido o formulário já abre, então envia na hora
+        const sendNow = notificarUsuarios && dataInicio === null;
+
         const item = await this.prisma.dataEncomenda.create({
             data: {
                 dataEntrega: new Date(createDto.data_entrega),
-                dataInicioPedido: createDto.data_inicio_pedido ? new Date(createDto.data_inicio_pedido) : null,
+                dataInicioPedido: dataInicio,
                 dataLimitePedido: new Date(createDto.data_limite_pedido),
                 ativo: createDto.ativo ?? true,
                 concluido: createDto.concluido ?? false,
                 observacoes: createDto.observacoes,
                 enderecosEspeciais: createDto.enderecos_especiais,
+                notificarUsuarios,
             },
         });
 
@@ -48,6 +59,18 @@ export class OrderFormsService {
                     variedadeId: s.variedade_id || null,
                 })),
             });
+        }
+
+        if (sendNow) {
+            try {
+                await this.sendFormNotification(item.id);
+                await this.prisma.dataEncomenda.update({
+                    where: { id: item.id },
+                    data: { notificacaoEnviadaEm: new Date() },
+                });
+            } catch (error) {
+                this.logger.error(`Falha ao enviar notificação imediata do formulário ${item.id}: ${error}`);
+            }
         }
 
         return this.findOne(item.id);
@@ -432,10 +455,10 @@ export class OrderFormsService {
     async sendFormNotification(id: number) {
         const orderForm = await this.findOne(id);
 
-        // Clientes e admins ativos (admins também usam o app e precisam do aviso de novo formulário)
+        // Apenas clientes ativos. Admins não recebem aviso de abertura.
         const users = await this.prisma.usuario.findMany({
             where: {
-                role: { in: ['user', 'admin'] },
+                role: 'user',
                 ativo: true,
                 email: { not: { endsWith: '@deleted.yatsunami' } },
             },
@@ -455,5 +478,32 @@ export class OrderFormsService {
         });
 
         return { sent: users.length, pushSent };
+    }
+
+    @Cron(CronExpression.EVERY_MINUTE)
+    async dispatchScheduledFormNotifications() {
+        const now = new Date();
+        const due = await this.prisma.dataEncomenda.findMany({
+            where: {
+                ativo: true,
+                notificarUsuarios: true,
+                notificacaoEnviadaEm: null,
+                dataInicioPedido: { not: null, lte: now },
+            },
+            select: { id: true },
+        });
+
+        for (const form of due) {
+            try {
+                await this.sendFormNotification(form.id);
+                await this.prisma.dataEncomenda.update({
+                    where: { id: form.id },
+                    data: { notificacaoEnviadaEm: new Date() },
+                });
+                this.logger.log(`Notificação de abertura enviada para formulário ${form.id}`);
+            } catch (error) {
+                this.logger.error(`Falha ao enviar notificação agendada do formulário ${form.id}: ${error}`);
+            }
+        }
     }
 }

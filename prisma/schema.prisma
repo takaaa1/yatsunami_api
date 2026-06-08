@@ -167,6 +167,8 @@ model DataEncomenda {
   observacoes            String?
   criadoEm               DateTime                @default(now()) @map("criado_em") @db.Timestamptz(6)
   enderecosEspeciais     Json?                   @map("enderecos_especiais")
+  notificarUsuarios      Boolean                 @default(true) @map("notificar_usuarios")
+  notificacaoEnviadaEm   DateTime?               @map("notificacao_enviada_em") @db.Timestamptz(6)
   entregadorLocalizacoes EntregadorLocalizacao[]
   entregasConcluidas     EntregaConcluida[]
   notificacoes           Notificacao[]
