@@ -6,9 +6,15 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { resolveRuntimeMode, isCronEnabled } from './common/runtime/runtime.config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+  const runtimeMode = resolveRuntimeMode();
+
+  if (!process.env.RUNTIME_MODE) {
+    process.env.RUNTIME_MODE = runtimeMode;
+  }
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
@@ -67,6 +73,7 @@ async function bootstrap() {
 
   await app.listen(port);
 
+  logger.log(`Runtime: ${runtimeMode} | crons=${isCronEnabled() ? 'on' : 'off'}`);
   logger.log(`🚀 Yatsunami API running on http://localhost:${port}`);
   logger.log(`📚 API endpoints available at http://localhost:${port}/api`);
   logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);

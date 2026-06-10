@@ -1,20 +1,26 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto } from './dto';
 import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { QrCodePix } from 'qrcode-pix';
 import { StorageService } from '../../config/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CronLockService } from '../../common/cron/cron-lock.service';
+import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 import { generateOrderCode } from '../../common/utils/string-utils';
 
 @Injectable()
 export class OrdersService {
+    private readonly logger = new Logger(OrdersService.name);
+
     constructor(
         private prisma: PrismaService,
         private configuracoesService: ConfiguracoesService,
         private storageService: StorageService,
         private notificationsService: NotificationsService,
+        private cronLockService: CronLockService,
     ) { }
 
     private formatAddress(address: any): string | null {
@@ -413,7 +419,7 @@ export class OrdersService {
         );
     }
 
-    async findByOrderForm(formId: number, search?: string) {
+    async findByOrderForm(formId: number, search?: string, skip = 0, take?: number) {
         const where: any = {
             dataEncomendaId: formId,
         };
@@ -429,8 +435,10 @@ export class OrdersService {
         const orders = await this.prisma.pedidoEncomenda.findMany({
             where,
             orderBy: [{ dataPedido: 'desc' }, { id: 'desc' }],
+            skip,
+            ...(take !== undefined ? { take } : {}),
             include: {
-                usuario: true, // Make sure usuario is included for filtering
+                usuario: true,
                 itens: {
                     include: {
                         produto: true,
@@ -441,6 +449,32 @@ export class OrdersService {
         });
 
         return orders;
+    }
+
+    /** Status efetivo para leitura — sem writes no GET. */
+    private withResolvedPaymentStatus<T extends {
+        statusPagamento: string;
+        enderecoEspecialNome: string | null;
+        dataEncomenda: { dataLimitePedido: Date };
+    }>(order: T, now = new Date()): T {
+        const deadline = new Date(order.dataEncomenda.dataLimitePedido);
+        let statusPagamento = order.statusPagamento;
+
+        if (statusPagamento === 'bloqueado' && now > deadline) {
+            statusPagamento = 'pendente';
+        } else if (
+            statusPagamento === 'pendente'
+            && order.enderecoEspecialNome
+            && now <= deadline
+        ) {
+            statusPagamento = 'bloqueado';
+        }
+
+        if (statusPagamento === order.statusPagamento) {
+            return order;
+        }
+
+        return { ...order, statusPagamento };
     }
 
     async findAll(userId: string, skip = 0, take = 10) {
@@ -461,46 +495,48 @@ export class OrdersService {
         });
 
         const now = new Date();
-        return Promise.all(orders.map(async (order) => {
-            const deadline = new Date(order.dataEncomenda.dataLimitePedido);
+        return orders.map((order) => this.withResolvedPaymentStatus(order, now));
+    }
 
-            // Automatic UNLOCK: if blocked and deadline passed -> pendente
-            if (order.statusPagamento === 'bloqueado' && now > deadline) {
-                return this.prisma.pedidoEncomenda.update({
-                    where: { id: order.id },
+    /** Persiste lock/unlock de pagamento — antes executado em cada GET. */
+    @Cron(CronExpression.EVERY_MINUTE)
+    async syncPaymentLockStatuses() {
+        await this.cronLockService.withLock(
+            CRON_LOCK_KEYS.PAYMENT_LOCK_SYNC,
+            'syncPaymentLockStatuses',
+            async () => {
+                const now = new Date();
+
+                const unlocked = await this.prisma.pedidoEncomenda.updateMany({
+                    where: {
+                        statusPagamento: 'bloqueado',
+                        dataEncomenda: { dataLimitePedido: { lt: now } },
+                    },
                     data: { statusPagamento: 'pendente' },
-                    include: {
-                        dataEncomenda: true,
-                        itens: {
-                            include: {
-                                produto: true,
-                                variedade: true,
-                            }
-                        }
-                    }
                 });
-            }
 
-            // Automatic LOCK: if pending (and not paid), special address, and deadline NOT passed -> bloqueado
-            // This handles cases where deadline is extended or order was wrongly set to pending
-            if (order.statusPagamento === 'pendente' && order.enderecoEspecialNome && now <= deadline) {
-                return this.prisma.pedidoEncomenda.update({
-                    where: { id: order.id },
-                    data: { statusPagamento: 'bloqueado' },
-                    include: {
-                        dataEncomenda: true,
-                        itens: {
-                            include: {
-                                produto: true,
-                                variedade: true,
-                            }
-                        }
-                    }
+                const toLock = await this.prisma.pedidoEncomenda.findMany({
+                    where: {
+                        statusPagamento: 'pendente',
+                        enderecoEspecialNome: { not: null },
+                        dataEncomenda: { dataLimitePedido: { gte: now } },
+                    },
+                    select: { id: true },
                 });
-            }
 
-            return order;
-        }));
+                let locked = { count: 0 };
+                if (toLock.length > 0) {
+                    locked = await this.prisma.pedidoEncomenda.updateMany({
+                        where: { id: { in: toLock.map((o) => o.id) } },
+                        data: { statusPagamento: 'bloqueado' },
+                    });
+                }
+
+                if (unlocked.count > 0 || locked.count > 0) {
+                    this.logger.debug(`Payment lock sync: unlocked=${unlocked.count}, locked=${locked.count}`);
+                }
+            },
+        );
     }
 
     async findOne(id: number, userId: string) {

@@ -35,6 +35,7 @@ model Usuario {
   vendasCriadas       Venda[]              @relation("VendaCriador")
   vendas              Venda[]
 
+  @@index([role, ativo])
   @@map("usuarios")
 }
 
@@ -138,6 +139,8 @@ model Venda {
   criador            Usuario?          @relation("VendaCriador", fields: [criadoPor], references: [id])
   usuario            Usuario?          @relation(fields: [usuarioId], references: [id])
 
+  @@index([data])
+  @@index([usuarioId])
   @@map("vendas")
 }
 
@@ -176,6 +179,8 @@ model DataEncomenda {
   produtosEncomenda      ProdutoEncomenda[]
   rotaEntrega            RotaEntrega?
 
+  @@index([ativo, concluido])
+  @@index([dataLimitePedido])
   @@map("datas_encomenda")
 }
 
@@ -224,6 +229,9 @@ model PedidoEncomenda {
   venda                   Venda?                @relation(fields: [vendaId], references: [id])
 
   @@unique([usuarioId, dataEncomendaId])
+  @@index([dataEncomendaId])
+  @@index([dataEncomendaId, statusPagamento])
+  @@index([usuarioId, dataPedido])
   @@map("pedidos_encomenda")
 }
 
@@ -294,6 +302,9 @@ model PedidoDireto {
   usuario       Usuario            @relation(fields: [usuarioId], references: [id])
   venda         Venda?             @relation(fields: [vendaId], references: [id])
 
+  @@index([usuarioId])
+  @@index([usuarioId, status])
+  @@index([dataPedido])
   @@map("pedidos_diretos")
 }
 
@@ -334,6 +345,8 @@ model EntregadorLocalizacao {
   userId        String?       @map("user_id")
   dataEncomenda DataEncomenda @relation(fields: [formId], references: [id])
 
+  @@index([formId])
+  @@index([formId, courierId])
   @@map("entregador_localizacao")
 }
 
@@ -450,5 +463,7 @@ model Notificacao {
   pedidoEncomenda   PedidoEncomenda? @relation(fields: [pedidoEncomendaId], references: [id])
   usuario           Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
+  @@index([usuarioId, criadoEm])
+  @@index([usuarioId, lido])
   @@map("notificacoes")
 }

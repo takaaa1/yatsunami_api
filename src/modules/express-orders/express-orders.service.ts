@@ -29,15 +29,40 @@ export class ExpressOrdersService {
       throw new ForbiddenException('User is not enabled for express orders');
     }
 
-    // Calculate totals and validate products
+    // Calculate totals and validate products (batch — evita N+1)
     let totalValor = 0;
     const itemsData: any[] = [];
 
-    for (const item of dto.itens) {
-      const product = await this.prisma.produto.findUnique({
-        where: { id: item.produtoId },
+    const productIds = [...new Set(dto.itens.map((item) => item.produtoId))];
+    const varietyIds = [
+      ...new Set(
+        dto.itens
+          .filter((item) => item.variedadeId)
+          .map((item) => item.variedadeId as number),
+      ),
+    ];
+
+    const [products, enabledProducts, enabledVarieties] = await Promise.all([
+      this.prisma.produto.findMany({
+        where: { id: { in: productIds } },
         include: { variedades: true },
-      });
+      }),
+      this.prisma.produtoPedidoDireto.findMany({
+        where: { produtoId: { in: productIds }, habilitado: true },
+      }),
+      varietyIds.length > 0
+        ? this.prisma.variedadePedidoDireto.findMany({
+            where: { variedadeId: { in: varietyIds }, habilitado: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const productMap = new Map(products.map((product) => [product.id, product]));
+    const enabledProductIds = new Set(enabledProducts.map((entry) => entry.produtoId));
+    const enabledVarietyIds = new Set(enabledVarieties.map((entry) => entry.variedadeId));
+
+    for (const item of dto.itens) {
+      const product = productMap.get(item.produtoId);
 
       if (!product) {
         throw new NotFoundException(`Product ${item.produtoId} not found`);
@@ -46,29 +71,20 @@ export class ExpressOrdersService {
       let price = Number(product.preco);
       let variety: typeof product.variedades[0] | null | undefined = null;
 
-      // Validate availability based on product or variety
       if (item.variedadeId) {
         variety = product.variedades.find((v) => v.id === item.variedadeId);
         if (!variety) {
           throw new NotFoundException(`Variety ${item.variedadeId} not found`);
         }
 
-        const varietyEnabled = await this.prisma.variedadePedidoDireto.findFirst({
-          where: { variedadeId: item.variedadeId, habilitado: true },
-        });
-        if (!varietyEnabled) {
+        if (!enabledVarietyIds.has(item.variedadeId)) {
           const vName = (variety.nome as any)?.['pt-BR'] || (variety.nome as any)?.['ja-JP'] || 'Variety';
           throw new BadRequestException(`Variety ${vName} is not available for express orders`);
         }
         price = Number(variety.preco);
-      } else {
-        const productEnabled = await this.prisma.produtoPedidoDireto.findFirst({
-          where: { produtoId: item.produtoId, habilitado: true },
-        });
-        if (!productEnabled) {
-          const name = (product.nome as any)?.['pt-BR'] || (product.nome as any)?.['ja-JP'] || 'Product';
-          throw new BadRequestException(`Product ${name} is not available for express orders`);
-        }
+      } else if (!enabledProductIds.has(item.produtoId)) {
+        const name = (product.nome as any)?.['pt-BR'] || (product.nome as any)?.['ja-JP'] || 'Product';
+        throw new BadRequestException(`Product ${name} is not available for express orders`);
       }
 
       const subtotal = price * item.quantidade;
@@ -204,33 +220,44 @@ export class ExpressOrdersService {
   }
 
   async updateStatus(id: number, status: string, adminUserId: string, observacoes?: string) {
-    const data: any = { status };
+    if (status === 'entregue') {
+      let wasAlreadyDelivered = false;
 
-    if (observacoes !== undefined) {
-      data.observacoes = observacoes;
-    }
+      const updatedOrder = await this.prisma.$transaction(async (tx) => {
+        const order = await tx.pedidoDireto.findUnique({
+          where: { id },
+          include: { itens: true },
+        });
 
-    if (status === 'confirmado') {
-      data.confirmadoEm = new Date();
-      data.confirmadoPor = adminUserId;
-      data.entregueEm = null;
-    } else if (status === 'entregue') {
-      data.entregueEm = new Date();
-      data.entreguePor = adminUserId;
+        if (!order) {
+          throw new NotFoundException('Order not found');
+        }
 
-      // Create a Venda record to register revenue in the dashboard
-      const order = await this.prisma.pedidoDireto.findUnique({
-        where: { id },
-        include: { itens: true },
-      });
+        if (order.status === 'entregue' && order.vendaId) {
+          wasAlreadyDelivered = true;
+          return tx.pedidoDireto.findUnique({
+            where: { id },
+            include: { usuario: { select: { id: true, nome: true } } },
+          });
+        }
 
-      if (order && !order.vendaId) {
-        const venda = await this.prisma.$transaction(async (tx) => {
+        const data: Record<string, unknown> = {
+          status: 'entregue',
+          entregueEm: new Date(),
+          entreguePor: adminUserId,
+        };
+
+        if (observacoes !== undefined) {
+          data.observacoes = observacoes;
+        }
+
+        if (!order.vendaId) {
           let total = new Prisma.Decimal(0);
           for (const item of order.itens) {
             total = total.add(new Prisma.Decimal(item.precoUnitario).mul(item.quantidade));
           }
-          return tx.venda.create({
+
+          const venda = await tx.venda.create({
             data: {
               usuarioId: order.usuarioId,
               observacoes: `Pedido Express #${order.codigo || order.id}`,
@@ -248,9 +275,49 @@ export class ExpressOrdersService {
               },
             },
           });
+          data.vendaId = venda.id;
+        }
+
+        return tx.pedidoDireto.update({
+          where: { id },
+          data,
+          include: {
+            usuario: { select: { id: true, nome: true } },
+          },
         });
-        data.vendaId = venda.id;
+      });
+
+      if (!updatedOrder) {
+        throw new NotFoundException('Order not found');
       }
+
+      if (!wasAlreadyDelivered) {
+        try {
+          await this.notificationsService.createAndSendNotification({
+            usuarioId: updatedOrder.usuarioId,
+            chave: 'notification.expressOrderDelivered',
+            parametros: { orderCode: updatedOrder.codigo ?? '' },
+            pedidoDiretoId: updatedOrder.id,
+            tipo: 'user',
+          });
+        } catch (error) {
+          console.error('Erro ao notificar usuário sobre status do pedido express:', error);
+        }
+      }
+
+      return updatedOrder;
+    }
+
+    const data: any = { status };
+
+    if (observacoes !== undefined) {
+      data.observacoes = observacoes;
+    }
+
+    if (status === 'confirmado') {
+      data.confirmadoEm = new Date();
+      data.confirmadoPor = adminUserId;
+      data.entregueEm = null;
     } else if (status === 'pendente') {
       data.confirmadoEm = null;
       data.confirmadoPor = null;
@@ -268,10 +335,7 @@ export class ExpressOrdersService {
 
     // Notificar o usuário sobre a mudança de status
     try {
-      let chave = 'notification.expressOrderConfirmed';
-      if (status === 'entregue') {
-        chave = 'notification.expressOrderDelivered';
-      }
+      const chave = 'notification.expressOrderConfirmed';
 
       await this.notificationsService.createAndSendNotification({
         usuarioId: updatedOrder.usuarioId,

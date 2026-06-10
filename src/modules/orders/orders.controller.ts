@@ -165,8 +165,15 @@ export class OrdersController {
     findByOrderForm(
         @Param('formId') formId: string,
         @Query('search') search?: string,
+        @Query('skip') skip?: number,
+        @Query('take') take?: number,
     ) {
-        return this.ordersService.findByOrderForm(+formId, search);
+        return this.ordersService.findByOrderForm(
+            +formId,
+            search,
+            Number(skip) || 0,
+            take !== undefined ? Number(take) : undefined,
+        );
     }
 
     @Get('form/:formId/summary')

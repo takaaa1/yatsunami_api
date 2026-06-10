@@ -1,12 +1,19 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
 import { TrackingGateway } from './tracking.gateway';
 import { RoutesService } from './routes.service';
 import { CreateRouteDto } from './dto/create-route.dto';
 import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators';
 
+@ApiTags('delivery')
 @Controller('delivery')
+@UseGuards(AuthGuard('jwt'))
+@ApiBearerAuth('JWT')
 export class DeliveryController {
     constructor(
         private readonly deliveryService: DeliveryService,
@@ -15,6 +22,8 @@ export class DeliveryController {
     ) { }
 
     @Post('routes')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     createRoute(@Body() createRouteDto: CreateRouteDto) {
         return this.deliveryService.createRoute(createRouteDto);
     }
@@ -25,6 +34,8 @@ export class DeliveryController {
     }
 
     @Patch('routes/:formId/reorder')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     reorderStops(
         @Param('formId', ParseIntPipe) formId: number,
         @Body() reorderStopsDto: ReorderStopsDto,
@@ -33,21 +44,25 @@ export class DeliveryController {
     }
 
     @Delete('routes/:formId')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     deleteRoute(@Param('formId', ParseIntPipe) formId: number) {
         return this.deliveryService.deleteRoute(formId);
     }
 
     @Post('location')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async updateLocation(@Body() updateLocationDto: UpdateLocationDto) {
         const result = await this.deliveryService.updateLocation(updateLocationDto);
-        // Also broadcast to WebSockets for real-time tracking
         this.trackingGateway.server.to(`tracking_${updateLocationDto.formId}`).emit('locationUpdate', updateLocationDto);
-        // Recalculate ETA if necessary (throttled)
         await this.trackingGateway.handleDynamicETA(updateLocationDto.formId, updateLocationDto.courierId);
         return result;
     }
 
     @Post('complete')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async markDeliveryComplete(
         @Body('formId', ParseIntPipe) formId: number,
         @Body('paradaIdx', ParseIntPipe) paradaIdx: number,
@@ -58,12 +73,13 @@ export class DeliveryController {
     }
 
     @Post('start-sharing')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async startRouteSharing(
         @Body('formId', ParseIntPipe) formId: number,
         @Body('courierId') courierId?: number,
         @Body('userId') userId?: string,
     ) {
-        // Check if another user is already tracking this courier route
         if (courierId !== undefined) {
             const activeTracking = await this.deliveryService.getActiveTracking(formId, courierId);
             if (activeTracking && activeTracking.isActive && activeTracking.userId !== userId) {
@@ -86,6 +102,8 @@ export class DeliveryController {
     }
 
     @Post('stop-sharing')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async stopRouteSharing(
         @Body('formId', ParseIntPipe) formId: number,
         @Body('courierId') courierId?: number,
@@ -96,6 +114,8 @@ export class DeliveryController {
     }
 
     @Get('tracking-status/:formId/:courierId')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async getTrackingStatus(
         @Param('formId', ParseIntPipe) formId: number,
         @Param('courierId', ParseIntPipe) courierId: number,
@@ -104,6 +124,8 @@ export class DeliveryController {
     }
 
     @Delete('complete')
+    @UseGuards(RolesGuard)
+    @Roles('admin')
     async unmarkDeliveryComplete(
         @Body('formId', ParseIntPipe) formId: number,
         @Body('paradaIdx', ParseIntPipe) paradaIdx: number,
@@ -131,10 +153,6 @@ export class DeliveryController {
         return this.deliveryService.calculateDynamicETAs(formId, courierId);
     }
 
-    /**
-     * Geocodifica um endereço via Google Maps e retorna endereço formatado + coordenadas.
-     * Usado pelo app para validar endereços antes de salvar no perfil.
-     */
     @Post('geocode-address')
     async geocodeAddress(@Body('address') address: string, @Body('cep') cep?: string) {
         if (!address || typeof address !== 'string' || address.trim().length < 5) {

@@ -3,13 +3,18 @@ import { PrismaService } from '../../prisma';
 import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 import { buildNotificationMessage, SupportedLocale } from './notifications.i18n';
 import { Cron } from '@nestjs/schedule';
+import { CronLockService } from '../../common/cron/cron-lock.service';
+import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 @Injectable()
 export class NotificationsService {
     private expo: Expo;
     private readonly logger = new Logger(NotificationsService.name);
 
-    constructor(private prisma: PrismaService) {
+    constructor(
+        private prisma: PrismaService,
+        private cronLockService: CronLockService,
+    ) {
         this.expo = new Expo({
             accessToken: process.env.EXPO_ACCESS_TOKEN,
         });
@@ -140,14 +145,20 @@ export class NotificationsService {
 
     @Cron('0 3 * * *') // Daily at 03:00
     async purgeOldNotifications() {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        await this.cronLockService.withLock(
+            CRON_LOCK_KEYS.NOTIFICATION_PURGE,
+            'purgeOldNotifications',
+            async () => {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        const result = await this.prisma.notificacao.deleteMany({
-            where: { criadoEm: { lt: thirtyDaysAgo } },
-        });
+                const result = await this.prisma.notificacao.deleteMany({
+                    where: { criadoEm: { lt: thirtyDaysAgo } },
+                });
 
-        this.logger.log(`Auto-purge: ${result.count} notificações com 30+ dias removidas`);
+                this.logger.log(`Auto-purge: ${result.count} notificações com 30+ dias removidas`);
+            },
+        );
     }
 
     async broadcastNotification(data: {
@@ -159,39 +170,16 @@ export class NotificationsService {
         pedidoEncomendaId?: number;
         tipo?: string;
     }) {
-        const notificacaoIdByUserId = new Map<string, string>();
-
-        // Criar notificações na Inbox individualmente
-        for (const id of data.usuarioIds) {
-            // Deduplicar antes de criar
-            await this.deduplicateNotification(
-                id,
-                data.chave,
-                data.pedidoDiretoId,
-                data.pedidoEncomendaId,
-                data.dataEncomendaId,
-            );
-
-            const notificacao = await this.prisma.notificacao.create({
-                data: {
-                    usuarioId: id,
-                    titulo: `${data.chave}.title`,
-                    mensagem: `${data.chave}.message`,
-                    parametros: data.parametros,
-                    dataEncomendaId: data.dataEncomendaId,
-                    pedidoDiretoId: data.pedidoDiretoId,
-                    pedidoEncomendaId: data.pedidoEncomendaId,
-                    tipo: data.tipo || 'admin',
-                },
-            });
-
-            notificacaoIdByUserId.set(id, notificacao.id);
+        const uniqueUserIds = [...new Set(data.usuarioIds)];
+        if (uniqueUserIds.length === 0) {
+            return { pushSent: 0 };
         }
 
-        // Buscar tokens e idiomas para envio push
+        const notificacaoIdByUserId = await this.createInboxNotificationsBulk(data, uniqueUserIds);
+
         const usuarios = await this.prisma.usuario.findMany({
             where: {
-                id: { in: data.usuarioIds },
+                id: { in: uniqueUserIds },
                 receberNotificacoes: true,
                 AND: [{ expoPushToken: { not: null } }, { expoPushToken: { not: '' } }],
             },
@@ -238,12 +226,62 @@ export class NotificationsService {
                     this.logger.error(`Erro ao enviar broadcast push chunk: ${error}`);
                 }
             }
-        } else if (data.usuarioIds.length > 0) {
+        } else if (uniqueUserIds.length > 0) {
             this.logger.log(
-                `Broadcast sem mensagens push (${data.usuarioIds.length} destinatários na inbox): nenhum token Expo válido com receberNotificacoes=true`,
+                `Broadcast sem mensagens push (${uniqueUserIds.length} destinatários na inbox): nenhum token Expo válido com receberNotificacoes=true`,
             );
         }
 
         return { pushSent: messages.length };
+    }
+
+    private async createInboxNotificationsBulk(
+        data: {
+            chave: string;
+            parametros: Record<string, string>;
+            dataEncomendaId?: number;
+            pedidoDiretoId?: number;
+            pedidoEncomendaId?: number;
+            tipo?: string;
+        },
+        usuarioIds: string[],
+    ): Promise<Map<string, string>> {
+        const notificacaoIdByUserId = new Map<string, string>();
+        const hasDedupeKey = !!(data.pedidoDiretoId || data.pedidoEncomendaId || data.dataEncomendaId);
+
+        if (hasDedupeKey) {
+            const dedupeWhere: Record<string, unknown> = {
+                usuarioId: { in: usuarioIds },
+                titulo: `${data.chave}.title`,
+            };
+            if (data.pedidoDiretoId) dedupeWhere.pedidoDiretoId = data.pedidoDiretoId;
+            if (data.pedidoEncomendaId) dedupeWhere.pedidoEncomendaId = data.pedidoEncomendaId;
+            if (data.dataEncomendaId) dedupeWhere.dataEncomendaId = data.dataEncomendaId;
+
+            await this.prisma.notificacao.deleteMany({ where: dedupeWhere });
+        }
+
+        const BATCH_SIZE = 100;
+        for (let offset = 0; offset < usuarioIds.length; offset += BATCH_SIZE) {
+            const batch = usuarioIds.slice(offset, offset + BATCH_SIZE);
+            const created = await this.prisma.notificacao.createManyAndReturn({
+                data: batch.map((usuarioId) => ({
+                    usuarioId,
+                    titulo: `${data.chave}.title`,
+                    mensagem: `${data.chave}.message`,
+                    parametros: data.parametros,
+                    dataEncomendaId: data.dataEncomendaId,
+                    pedidoDiretoId: data.pedidoDiretoId,
+                    pedidoEncomendaId: data.pedidoEncomendaId,
+                    tipo: data.tipo || 'admin',
+                })),
+            });
+
+            for (const notificacao of created) {
+                notificacaoIdByUserId.set(notificacao.usuarioId, notificacao.id);
+            }
+        }
+
+        return notificacaoIdByUserId;
     }
 }

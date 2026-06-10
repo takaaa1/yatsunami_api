@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CronLockService } from '../../common/cron/cron-lock.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -10,6 +11,13 @@ describe('NotificationsService', () => {
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: {} },
+        {
+          provide: CronLockService,
+          useValue: {
+            enabled: () => true,
+            withLock: async (_key: number, _name: string, fn: () => Promise<void>) => fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -6,6 +6,8 @@ import { CreateRouteDto } from './dto/create-route.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
+import { CronLockService } from '../../common/cron/cron-lock.service';
+import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 @Injectable()
 export class DeliveryService {
@@ -15,6 +17,7 @@ export class DeliveryService {
         private readonly prisma: PrismaService,
         private readonly routesService: RoutesService,
         private readonly configuracoesService: ConfiguracoesService,
+        private readonly cronLockService: CronLockService,
     ) { }
 
     async createRoute(createRouteDto: CreateRouteDto) {
@@ -916,25 +919,31 @@ export class DeliveryService {
 
     @Cron(CronExpression.EVERY_MINUTE)
     async handleStaleTracking() {
-        const STALE_THRESHOLD_MINUTES = 2;
-        const staleDate = new Date();
-        staleDate.setMinutes(staleDate.getMinutes() - STALE_THRESHOLD_MINUTES);
+        await this.cronLockService.withLock(
+            CRON_LOCK_KEYS.STALE_TRACKING,
+            'handleStaleTracking',
+            async () => {
+                const STALE_THRESHOLD_MINUTES = 2;
+                const staleDate = new Date();
+                staleDate.setMinutes(staleDate.getMinutes() - STALE_THRESHOLD_MINUTES);
 
-        const staleSessions = await this.prisma.entregadorLocalizacao.findMany({
-            where: {
-                atualizadoEm: { lt: staleDate }
-            }
-        });
+                const staleSessions = await this.prisma.entregadorLocalizacao.findMany({
+                    where: {
+                        atualizadoEm: { lt: staleDate },
+                    },
+                });
 
-        if (staleSessions.length > 0) {
-            this.logger.log(`Cleaning up ${staleSessions.length} stale tracking sessions (inactive for ${STALE_THRESHOLD_MINUTES}min)`);
-            for (const session of staleSessions) {
-                try {
-                    await this.stopRouteSharing(session.formId, session.courierId ?? undefined);
-                } catch (error) {
-                    this.logger.error(`Failed to cleanup stale tracking for form ${session.formId}: ${error.message}`);
+                if (staleSessions.length > 0) {
+                    this.logger.log(`Cleaning up ${staleSessions.length} stale tracking sessions (inactive for ${STALE_THRESHOLD_MINUTES}min)`);
+                    for (const session of staleSessions) {
+                        try {
+                            await this.stopRouteSharing(session.formId, session.courierId ?? undefined);
+                        } catch (error) {
+                            this.logger.error(`Failed to cleanup stale tracking for form ${session.formId}: ${error.message}`);
+                        }
+                    }
                 }
-            }
-        }
+            },
+        );
     }
 }

@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma';
 import { MailService } from '../../common/services/mail.service';
 import { StorageService } from '../../config/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const mockUser = {
     id: 'uuid-1',
@@ -64,6 +65,10 @@ const mockStorageService = {
     getPublicUrl: jest.fn(),
 };
 
+const mockNotificationsService = {
+    createAndSendNotification: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('AuthService', () => {
     let service: AuthService;
 
@@ -76,6 +81,7 @@ describe('AuthService', () => {
                 { provide: MailService, useValue: mockMailService },
                 { provide: ConfigService, useValue: mockConfigService },
                 { provide: StorageService, useValue: mockStorageService },
+                { provide: NotificationsService, useValue: mockNotificationsService },
             ],
         }).compile();
 

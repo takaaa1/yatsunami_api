@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, ParseIntPipe, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, ParseIntPipe, Res, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 import { OrderFormsService } from './order-forms.service';
 import { CreateOrderFormDto, UpdateOrderFormDto } from './dto';
@@ -7,6 +7,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { PdfService } from '../pdf/pdf.service';
+import { BackgroundJobService } from '../../common/jobs/background-job.service';
+import { PdfJobResult } from '../../common/jobs/background-job.types';
 
 @ApiTags('order-forms')
 @ApiTags('order-forms')
@@ -15,6 +17,7 @@ export class OrderFormsController {
     constructor(
         private readonly orderFormsService: OrderFormsService,
         private readonly pdfService: PdfService,
+        private readonly backgroundJobService: BackgroundJobService,
     ) { }
 
     @Post()
@@ -29,9 +32,16 @@ export class OrderFormsController {
     @Get()
     @ApiBearerAuth('JWT')
     @UseGuards(AuthGuard('jwt'), RolesGuard)
+    @Roles('admin')
     @ApiOperation({ summary: 'List all order forms' })
-    findAll() {
-        return this.orderFormsService.findAll();
+    findAll(
+        @Query('skip') skip?: number,
+        @Query('take') take?: number,
+    ) {
+        return this.orderFormsService.findAll(
+            Number(skip) || 0,
+            take !== undefined ? Number(take) : undefined,
+        );
     }
 
     @Get('available')
@@ -84,11 +94,38 @@ export class OrderFormsController {
         return this.orderFormsService.remove(id);
     }
 
+    @Post(':id/pdf-summary')
+    @ApiBearerAuth('JWT')
+    @UseGuards(AuthGuard('jwt'), RolesGuard)
+    @Roles('admin')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @ApiOperation({ summary: 'Enfileirar geração assíncrona do resumo PDF' })
+    @ApiResponse({ status: 202, description: 'Job de PDF enfileirado' })
+    queueSummaryPdf(@Param('id', ParseIntPipe) id: number) {
+        const jobId = this.backgroundJobService.enqueue<PdfJobResult>(
+            `pdf-summary-${id}`,
+            async () => {
+                const data = await this.orderFormsService.getSummaryData(id);
+                const buffer = await this.pdfService.generateOrderSummary(data);
+                return {
+                    buffer,
+                    filename: `resumo_pedidos_${id}.pdf`,
+                    contentType: 'application/pdf',
+                };
+            },
+        );
+
+        return {
+            jobId,
+            status: 'queued',
+        };
+    }
+
     @Get(':id/pdf-summary')
     @ApiBearerAuth('JWT')
     @UseGuards(AuthGuard('jwt'), RolesGuard)
     @Roles('admin')
-    @ApiOperation({ summary: 'Gerar resumo PDF consolidado de pedidos' })
+    @ApiOperation({ summary: 'Gerar resumo PDF consolidado de pedidos (síncrono — legado)' })
     @ApiResponse({ status: 200, description: 'Resumo PDF gerado com sucesso' })
     async getSummaryPdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
         const data = await this.orderFormsService.getSummaryData(id);
@@ -107,7 +144,9 @@ export class OrderFormsController {
     @ApiBearerAuth('JWT')
     @UseGuards(AuthGuard('jwt'), RolesGuard)
     @Roles('admin')
-    @ApiOperation({ summary: 'Enviar notificação sobre este formulário para usuários e admins ativos (inbox + push)' })
+    @HttpCode(HttpStatus.ACCEPTED)
+    @ApiOperation({ summary: 'Enfileirar notificação sobre este formulário para usuários ativos' })
+    @ApiResponse({ status: 202, description: 'Envio enfileirado' })
     sendNotification(@Param('id', ParseIntPipe) id: number) {
         return this.orderFormsService.sendFormNotification(id);
     }

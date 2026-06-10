@@ -5,6 +5,9 @@ import { CreateOrderFormDto, UpdateOrderFormDto } from './dto';
 import { SalesService } from '../sales/sales.service';
 import { DiscountType } from '../sales/dto/create-sale.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BackgroundJobService } from '../../common/jobs/background-job.service';
+import { CronLockService } from '../../common/cron/cron-lock.service';
+import { CRON_LOCK_KEYS, isBackgroundJobRuntime } from '../../common/runtime/runtime.config';
 
 @Injectable()
 export class OrderFormsService {
@@ -14,6 +17,8 @@ export class OrderFormsService {
         private prisma: PrismaService,
         private salesService: SalesService,
         private notificationsService: NotificationsService,
+        private backgroundJobService: BackgroundJobService,
+        private cronLockService: CronLockService,
     ) { }
 
     private mapToSnakeCase(item: any) {
@@ -69,14 +74,14 @@ export class OrderFormsService {
                     data: { notificacaoEnviadaEm: new Date() },
                 });
             } catch (error) {
-                this.logger.error(`Falha ao enviar notificação imediata do formulário ${item.id}: ${error}`);
+                this.logger.error(`Falha ao enfileirar notificação imediata do formulário ${item.id}: ${error}`);
             }
         }
 
         return this.findOne(item.id);
     }
 
-    async findAll() {
+    async findAll(skip = 0, take?: number) {
         // Fetch all categories to get their order
         const categories = await this.prisma.categoria.findMany();
         const categoryOrderMap = new Map<string, number>();
@@ -87,6 +92,8 @@ export class OrderFormsService {
         });
 
         const items = await this.prisma.dataEncomenda.findMany({
+            skip,
+            ...(take !== undefined ? { take } : {}),
             include: {
                 produtosEncomenda: {
                     include: {
@@ -230,55 +237,10 @@ export class OrderFormsService {
                 data: { statusPagamento: 'entregue', emEntrega: false },
             });
 
-            // Create Sales for all non-cancelled orders
-            const orders = await this.prisma.pedidoEncomenda.findMany({
-                where: {
-                    dataEncomendaId: id,
-                    statusPagamento: { not: 'cancelado' },
-                    vendaId: null, // Prevent double creation
-                },
-                include: {
-                    itens: {
-                        include: {
-                            produto: true,
-                            variedade: true,
-                        },
-                    },
-                },
+            // Create Sales for all non-cancelled orders (background — não bloqueia PATCH)
+            this.backgroundJobService.fireAndForget(`form-close-sales-${id}`, async () => {
+                await this.createSalesForClosedForm(id, adminUserId);
             });
-
-            // Verify if the admin user exists in our local database to avoid FK violations
-            const adminExists = adminUserId ? await this.prisma.usuario.findUnique({ where: { id: adminUserId } }) : null;
-            const validAdminId: string | null = adminExists ? (adminUserId as string) : null;
-
-            for (const order of orders) {
-                try {
-                    const deliveryFee = Number(order.taxaEntrega) || 0;
-                    const saleData = {
-                        usuarioId: order.usuarioId,
-                        observacoes: deliveryFee > 0
-                            ? `Formulário #${id} - Pedido ${order.codigo || order.id} | Taxa de entrega: R$ ${deliveryFee.toFixed(2).replace('.', ',')}`
-                            : `Formulário #${id} - Pedido ${order.codigo || order.id}`,
-                        taxaEntrega: deliveryFee > 0 ? deliveryFee : undefined,
-                        data: order.horarioEstimadoEntrega ?? undefined,
-                        itens: order.itens.map(item => ({
-                            produtoId: item.produtoId,
-                            variedadeId: item.variedadeId || undefined,
-                            quantidade: item.quantidade,
-                            precoUnitario: Number(item.precoUnitario || 0),
-                        })),
-                    };
-
-                    const sale = await this.salesService.create(validAdminId, saleData);
-
-                    await this.prisma.pedidoEncomenda.update({
-                        where: { id: order.id },
-                        data: { vendaId: sale.id },
-                    });
-                } catch (error) {
-                    console.error(`Error creating sale for order ${order.id}:`, error);
-                }
-            }
         }
 
         // If form is being reopened, RESTORE previous status ONLY for batch-confirmed orders
@@ -452,10 +414,100 @@ export class OrderFormsService {
         };
     }
 
+    private async createSalesForClosedForm(id: number, adminUserId?: string) {
+        const orders = await this.prisma.pedidoEncomenda.findMany({
+            where: {
+                dataEncomendaId: id,
+                statusPagamento: { not: 'cancelado' },
+                vendaId: null,
+            },
+            include: {
+                itens: {
+                    include: {
+                        produto: true,
+                        variedade: true,
+                    },
+                },
+            },
+        });
+
+        if (orders.length === 0) {
+            return;
+        }
+
+        const adminExists = adminUserId
+            ? await this.prisma.usuario.findUnique({ where: { id: adminUserId } })
+            : null;
+        const validAdminId: string | null = adminExists ? (adminUserId as string) : null;
+
+        for (const order of orders) {
+            try {
+                const deliveryFee = Number(order.taxaEntrega) || 0;
+                const saleData = {
+                    usuarioId: order.usuarioId,
+                    observacoes: deliveryFee > 0
+                        ? `Formulário #${id} - Pedido ${order.codigo || order.id} | Taxa de entrega: R$ ${deliveryFee.toFixed(2).replace('.', ',')}`
+                        : `Formulário #${id} - Pedido ${order.codigo || order.id}`,
+                    taxaEntrega: deliveryFee > 0 ? deliveryFee : undefined,
+                    data: order.horarioEstimadoEntrega ?? undefined,
+                    itens: order.itens.map(item => ({
+                        produtoId: item.produtoId,
+                        variedadeId: item.variedadeId || undefined,
+                        quantidade: item.quantidade,
+                        precoUnitario: Number(item.precoUnitario || 0),
+                    })),
+                };
+
+                const sale = await this.salesService.create(validAdminId, saleData);
+
+                await this.prisma.pedidoEncomenda.update({
+                    where: { id: order.id },
+                    data: { vendaId: sale.id },
+                });
+            } catch (error) {
+                this.logger.error(`Error creating sale for order ${order.id}: ${error}`);
+            }
+        }
+    }
+
     async sendFormNotification(id: number) {
+        const { recipientCount, payload } = await this.buildFormNotificationPayload(id);
+
+        if (recipientCount === 0) {
+            return { accepted: true, recipientCount: 0, async: true };
+        }
+
+        if (!isBackgroundJobRuntime()) {
+            const result = await this.executeFormNotification(id);
+            return {
+                accepted: true,
+                recipientCount: result.sent,
+                async: false,
+                pushSent: result.pushSent,
+            };
+        }
+
+        this.backgroundJobService.fireAndForget(`form-notification-${id}`, async () => {
+            await this.notificationsService.broadcastNotification(payload);
+        });
+
+        return { accepted: true, recipientCount, async: true };
+    }
+
+    async executeFormNotification(id: number) {
+        const { recipientCount, payload } = await this.buildFormNotificationPayload(id);
+
+        if (recipientCount === 0) {
+            return { sent: 0, pushSent: 0 };
+        }
+
+        const { pushSent } = await this.notificationsService.broadcastNotification(payload);
+        return { sent: recipientCount, pushSent };
+    }
+
+    private async buildFormNotificationPayload(id: number) {
         const orderForm = await this.findOne(id);
 
-        // Apenas clientes ativos. Admins não recebem aviso de abertura.
         const users = await this.prisma.usuario.findMany({
             where: {
                 role: 'user',
@@ -465,45 +517,50 @@ export class OrderFormsService {
             select: { id: true },
         });
 
-        if (users.length === 0) return { sent: 0, pushSent: 0 };
-
         const formattedDate = new Date(orderForm.data_entrega).toLocaleDateString('pt-BR');
 
-        const { pushSent } = await this.notificationsService.broadcastNotification({
-            usuarioIds: users.map(u => u.id),
-            chave: 'notification.newOrderForm',
-            parametros: { data: formattedDate },
-            dataEncomendaId: id,
-            tipo: 'user',
-        });
-
-        return { sent: users.length, pushSent };
+        return {
+            recipientCount: users.length,
+            payload: {
+                usuarioIds: users.map(u => u.id),
+                chave: 'notification.newOrderForm',
+                parametros: { data: formattedDate },
+                dataEncomendaId: id,
+                tipo: 'user',
+            },
+        };
     }
 
     @Cron(CronExpression.EVERY_MINUTE)
     async dispatchScheduledFormNotifications() {
-        const now = new Date();
-        const due = await this.prisma.dataEncomenda.findMany({
-            where: {
-                ativo: true,
-                notificarUsuarios: true,
-                notificacaoEnviadaEm: null,
-                dataInicioPedido: { not: null, lte: now },
-            },
-            select: { id: true },
-        });
-
-        for (const form of due) {
-            try {
-                await this.sendFormNotification(form.id);
-                await this.prisma.dataEncomenda.update({
-                    where: { id: form.id },
-                    data: { notificacaoEnviadaEm: new Date() },
+        await this.cronLockService.withLock(
+            CRON_LOCK_KEYS.FORM_OPEN_NOTIFICATIONS,
+            'dispatchScheduledFormNotifications',
+            async () => {
+                const now = new Date();
+                const due = await this.prisma.dataEncomenda.findMany({
+                    where: {
+                        ativo: true,
+                        notificarUsuarios: true,
+                        notificacaoEnviadaEm: null,
+                        dataInicioPedido: { not: null, lte: now },
+                    },
+                    select: { id: true },
                 });
-                this.logger.log(`Notificação de abertura enviada para formulário ${form.id}`);
-            } catch (error) {
-                this.logger.error(`Falha ao enviar notificação agendada do formulário ${form.id}: ${error}`);
-            }
-        }
+
+                for (const form of due) {
+                    try {
+                        await this.executeFormNotification(form.id);
+                        await this.prisma.dataEncomenda.update({
+                            where: { id: form.id },
+                            data: { notificacaoEnviadaEm: new Date() },
+                        });
+                        this.logger.log(`Notificação de abertura enviada para formulário ${form.id}`);
+                    } catch (error) {
+                        this.logger.error(`Falha ao enviar notificação agendada do formulário ${form.id}: ${error}`);
+                    }
+                }
+            },
+        );
     }
 }

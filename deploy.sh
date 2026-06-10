@@ -86,6 +86,8 @@ prepare_docker_env_file() {
   grep -vE '^[[:space:]]*(export[[:space:]]+)?(DATABASE_URL|DIRECT_URL)=' ./.env >"$DOCKER_ENV_FILE" || true
   printf 'DATABASE_URL=%s\n' "$db_url" >>"$DOCKER_ENV_FILE"
   printf 'DIRECT_URL=%s\n' "$direct_url" >>"$DOCKER_ENV_FILE"
+  grep -qE '^[[:space:]]*(export[[:space:]]+)?RUNTIME_MODE=' "$DOCKER_ENV_FILE" || printf 'RUNTIME_MODE=long-running\n' >>"$DOCKER_ENV_FILE"
+  grep -qE '^[[:space:]]*(export[[:space:]]+)?CRON_ENABLED=' "$DOCKER_ENV_FILE" || printf 'CRON_ENABLED=true\n' >>"$DOCKER_ENV_FILE"
 }
 
 cleanup_docker_env_file() {

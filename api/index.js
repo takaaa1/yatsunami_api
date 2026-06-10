@@ -1,4 +1,5 @@
 "use strict";
+/** @deprecated Produção usa VPS/Docker (dist/main.js). Vercel: só REST; crons/jobs/WS desactivados. Ver docs/RUNTIME-ARCHITECTURE.md */
 Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
@@ -7,6 +8,9 @@ const app_module_1 = require("../src/app.module");
 let cachedHandler;
 async function getHandler() {
     if (!cachedHandler) {
+        process.env.RUNTIME_MODE = 'serverless';
+        process.env.CRON_ENABLED = 'false';
+
         let dbUrl = process.env.DATABASE_URL || '';
         if (dbUrl.includes('supabase.com') && dbUrl.includes('6543') && !dbUrl.includes('pgbouncer=true')) {
             const separator = dbUrl.includes('?') ? '&' : '?';
