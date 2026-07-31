@@ -263,7 +263,7 @@ start_api_proxy_container() {
     nginx:alpine
   if ! wait_for_proxy_container_running; then
     log "ERRO: proxy ${API_PROXY_NAME} não ficou Up."
-    docker logs "$API_PROXY_NAME" --tail 40 2>/dev/null || true
+    timeout 10 docker logs "$API_PROXY_NAME" --tail 40 </dev/null 2>/dev/null || true
     exit 1
   fi
   docker exec "$API_PROXY_NAME" nginx -t
@@ -319,7 +319,7 @@ wait_for_proxy_health() {
     elapsed=$((elapsed + 2))
   done
   log "ERRO: proxy/API não responde em :${API_PUBLIC_PORT} (último HTTP ${code:-?})."
-  docker logs "$API_PROXY_NAME" --tail 20 2>/dev/null || true
+  timeout 10 docker logs "$API_PROXY_NAME" --tail 20 </dev/null 2>/dev/null || true
   return 1
 }
 
@@ -464,7 +464,7 @@ deploy_api_blue_green() {
   log "Ativo=${active} (:${active_port}); a subir standby=${standby} (:${standby_port})..."
   run_api_slot "$standby"
   if ! wait_for_api_health "$standby_port"; then
-    docker logs "$standby_name" --tail 50 2>/dev/null || true
+    timeout 10 docker logs "$standby_name" --tail 50 </dev/null 2>/dev/null || true
     docker rm -f "$standby_name" 2>/dev/null || true
     exit 1
   fi
