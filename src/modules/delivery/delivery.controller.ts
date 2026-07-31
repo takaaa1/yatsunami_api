@@ -9,6 +9,7 @@ import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @ApiTags('delivery')
 @Controller('delivery')
@@ -19,7 +20,16 @@ export class DeliveryController {
         private readonly deliveryService: DeliveryService,
         private readonly trackingGateway: TrackingGateway,
         private readonly routesService: RoutesService,
+        private readonly realtimeGateway: RealtimeGateway,
     ) { }
+
+    /** Notifica clientes em /realtime que pedidos tiveram emEntrega alterado. */
+    private broadcastOrdersEmEntrega(orderIds: number[] | undefined, emEntrega: boolean) {
+        if (!orderIds?.length) return;
+        for (const id of orderIds) {
+            this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', { id, emEntrega });
+        }
+    }
 
     @Post('routes')
     @UseGuards(RolesGuard)
@@ -69,6 +79,13 @@ export class DeliveryController {
     ) {
         const result = await this.deliveryService.markDeliveryComplete(formId, paradaIdx);
         this.trackingGateway.sendDeliveryUpdate(formId, paradaIdx);
+        for (const id of result.orderIds ?? []) {
+            this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', {
+                id,
+                emEntrega: false,
+                statusPagamento: 'entregue',
+            });
+        }
         return result;
     }
 
@@ -98,6 +115,7 @@ export class DeliveryController {
             userId: result.userId,
             courierId,
         });
+        this.broadcastOrdersEmEntrega(result.orderIds, true);
         return result;
     }
 
@@ -110,6 +128,7 @@ export class DeliveryController {
     ) {
         const result = await this.deliveryService.stopRouteSharing(formId, courierId);
         this.trackingGateway.broadcastSharingStatus(formId, false, { courierId });
+        this.broadcastOrdersEmEntrega(result.orderIds, false);
         return result;
     }
 

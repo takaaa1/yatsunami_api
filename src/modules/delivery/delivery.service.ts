@@ -649,9 +649,10 @@ export class DeliveryService {
                     },
                 });
             }
+            return { ...result, orderIds: ids };
         }
 
-        return result;
+        return { ...result, orderIds: [] as number[] };
     }
 
     async unmarkDeliveryComplete(formId: number, paradaIdx: number) {
@@ -763,19 +764,27 @@ export class DeliveryService {
             })
         )).filter(Boolean);
 
+        let updatedOrderIds: number[] = [];
         if (orderIds.length > 0) {
             // Use emEntrega flag instead of statusPagamento
-            await this.prisma.pedidoEncomenda.updateMany({
+            const updatable = await this.prisma.pedidoEncomenda.findMany({
                 where: {
                     id: { in: orderIds },
                     // Do not update already delivered or cancelled orders
-                    statusPagamento: { notIn: ['entregue', 'cancelado'] }
+                    statusPagamento: { notIn: ['entregue', 'cancelado'] },
                 },
-                data: { emEntrega: true },
+                select: { id: true },
             });
+            updatedOrderIds = updatable.map((o) => o.id);
+            if (updatedOrderIds.length > 0) {
+                await this.prisma.pedidoEncomenda.updateMany({
+                    where: { id: { in: updatedOrderIds } },
+                    data: { emEntrega: true },
+                });
+            }
         }
 
-        this.logger.debug(`Route sharing started for form ${formId}, courier ${courierId || 'all'}, by user ${userId || 'unknown'}, orders: ${orderIds.length}`);
+        this.logger.debug(`Route sharing started for form ${formId}, courier ${courierId || 'all'}, by user ${userId || 'unknown'}, orders: ${updatedOrderIds.length}`);
 
         let userName: string | null = null;
         if (userId) {
@@ -786,7 +795,14 @@ export class DeliveryService {
             userName = user?.nome ?? null;
         }
 
-        return { success: true, updatedCount: orderIds.length, courierId, userId, userName };
+        return {
+            success: true,
+            updatedCount: updatedOrderIds.length,
+            orderIds: updatedOrderIds,
+            courierId,
+            userId,
+            userName,
+        };
     }
 
     async stopRouteSharing(formId: number, courierId?: number) {
@@ -828,7 +844,7 @@ export class DeliveryService {
             });
         }
 
-        return { success: true, updatedCount: orderIds.length };
+        return { success: true, updatedCount: orderIds.length, orderIds };
     }
 
     async getDeliveryStatus(formId: number, courierId?: number) {
