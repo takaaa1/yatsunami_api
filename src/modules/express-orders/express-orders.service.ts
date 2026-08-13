@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateExpressOrderDto } from './dto/create-express-order.dto';
 import { generateOrderCode } from '../../common/utils/string-utils';
-import { Prisma } from '@prisma/client';
+import { readLocalizedText } from '../../common/utils/localized-text';
+import { Prisma, VariedadePedidoDireto } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -31,7 +32,13 @@ export class ExpressOrdersService {
 
     // Calculate totals and validate products (batch — evita N+1)
     let totalValor = 0;
-    const itemsData: any[] = [];
+    const itemsData: {
+      produtoId: number;
+      variedadeId: number | null | undefined;
+      quantidade: number;
+      precoUnitario: number;
+      subtotal: number;
+    }[] = [];
 
     const productIds = [...new Set(dto.itens.map((item) => item.produtoId))];
     const varietyIds = [
@@ -54,7 +61,7 @@ export class ExpressOrdersService {
         ? this.prisma.variedadePedidoDireto.findMany({
             where: { variedadeId: { in: varietyIds }, habilitado: true },
           })
-        : Promise.resolve([]),
+        : Promise.resolve<VariedadePedidoDireto[]>([]),
     ]);
 
     const productMap = new Map(products.map((product) => [product.id, product]));
@@ -78,12 +85,12 @@ export class ExpressOrdersService {
         }
 
         if (!enabledVarietyIds.has(item.variedadeId)) {
-          const vName = (variety.nome as any)?.['pt-BR'] || (variety.nome as any)?.['ja-JP'] || 'Variety';
+          const vName = readLocalizedText(variety.nome, 'Variety');
           throw new BadRequestException(`Variety ${vName} is not available for express orders`);
         }
         price = Number(variety.preco);
       } else if (!enabledProductIds.has(item.produtoId)) {
-        const name = (product.nome as any)?.['pt-BR'] || (product.nome as any)?.['ja-JP'] || 'Product';
+        const name = readLocalizedText(product.nome, 'Product');
         throw new BadRequestException(`Product ${name} is not available for express orders`);
       }
 
@@ -194,7 +201,16 @@ export class ExpressOrdersService {
     });
   }
 
-  async findOne(id: number, user: any) {
+  /** `Produto.categoria` é coluna JSON; sem `ordem` numérica, vai para o fim. */
+  private readCategoriaOrdem(categoria: unknown): number {
+    if (categoria && typeof categoria === 'object' && !Array.isArray(categoria)) {
+      const ordem = (categoria as { ordem?: unknown }).ordem;
+      if (typeof ordem === 'number') return ordem;
+    }
+    return 999;
+  }
+
+  async findOne(id: number, user: { id: string; role?: string }) {
     const order = await this.prisma.pedidoDireto.findUnique({
       where: { id },
       include: {
@@ -308,7 +324,7 @@ export class ExpressOrdersService {
       return updatedOrder;
     }
 
-    const data: any = { status };
+    const data: Prisma.PedidoDiretoUpdateInput = { status };
 
     if (observacoes !== undefined) {
       data.observacoes = observacoes;
@@ -438,15 +454,15 @@ export class ExpressOrdersService {
     });
 
     return products.sort((a, b) => {
-      const catOrderA = (a.categoria as any)?.ordem || 999;
-      const catOrderB = (b.categoria as any)?.ordem || 999;
+      const catOrderA = this.readCategoriaOrdem(a.categoria);
+      const catOrderB = this.readCategoriaOrdem(b.categoria);
 
       if (catOrderA !== catOrderB) {
         return catOrderA - catOrderB;
       }
 
-      const nameA = (a.nome as any)?.['pt-BR'] || (a.nome as any)?.['ja-JP'] || '';
-      const nameB = (b.nome as any)?.['pt-BR'] || (b.nome as any)?.['ja-JP'] || '';
+      const nameA = readLocalizedText(a.nome);
+      const nameB = readLocalizedText(b.nome);
       return nameA.localeCompare(nameB);
     });
   }

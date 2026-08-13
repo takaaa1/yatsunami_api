@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { AuthenticatedRequest } from '../../common/types/authenticated-request';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CreateExpressOrderDto } from './dto/create-express-order.dto';
@@ -17,13 +18,13 @@ export class ExpressOrdersController {
 
   @Get('status')
   @ApiOperation({ summary: 'Check if user is enabled for express orders' })
-  checkStatus(@Req() req) {
+  checkStatus(@Req() req: AuthenticatedRequest) {
     return this.expressOrdersService.checkStatus(req.user.id);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new express order' })
-  create(@Req() req, @Body() createExpressOrderDto: CreateExpressOrderDto) {
+  create(@Req() req: AuthenticatedRequest, @Body() createExpressOrderDto: CreateExpressOrderDto) {
     return this.expressOrdersService.create(req.user.id, createExpressOrderDto);
   }
 
@@ -41,7 +42,7 @@ export class ExpressOrdersController {
   @Get('my')
   @ApiOperation({ summary: 'List my express orders' })
   findMyOrders(
-    @Req() req,
+    @Req() req: AuthenticatedRequest,
     @Query('skip') skip?: number,
     @Query('take') take?: number,
   ) {
@@ -63,7 +64,7 @@ export class ExpressOrdersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get express order details' })
-  findOne(@Param('id', ParseIntPipe) id: number, @Req() req) {
+  findOne(@Param('id', ParseIntPipe) id: number, @Req() req: AuthenticatedRequest) {
     return this.expressOrdersService.findOne(id, req.user);
   }
 
@@ -73,14 +74,14 @@ export class ExpressOrdersController {
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateExpressStatusDto: UpdateExpressStatusDto,
-    @Req() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     return this.expressOrdersService.updateStatus(id, updateExpressStatusDto.status, req.user.id, updateExpressStatusDto.observacoes);
   }
 
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel own express order' })
-  cancelOrder(@Param('id', ParseIntPipe) id: number, @Req() req) {
+  cancelOrder(@Param('id', ParseIntPipe) id: number, @Req() req: AuthenticatedRequest) {
     return this.expressOrdersService.cancelOrder(id, req.user.id);
   }
 
