@@ -1,6 +1,7 @@
 import { IsBoolean, IsDateString, IsOptional, IsString, IsArray, ValidateNested, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { Prisma } from '@prisma/client';
 import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 class SelectionDto {
@@ -53,7 +54,7 @@ export class CreateOrderFormDto {
 
     @ApiProperty({ description: 'Endereços especiais (JSON stringified)', required: false })
     @IsOptional()
-    enderecos_especiais?: any;
+    enderecos_especiais?: Prisma.InputJsonValue;
 
     @ApiProperty({ description: 'Enviar notificação aos usuários quando o formulário abrir', default: true, required: false })
     @IsBoolean()
