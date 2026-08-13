@@ -8,7 +8,7 @@ import {
  * Aplica sanitização na transformação do DTO (antes da validação class-validator).
  */
 export function Sanitized(kind: UserInputSanitizeKind = 'plain', maxLength?: number) {
-  return Transform(({ value }) => {
+  return Transform(({ value }: { value: unknown }) => {
     if (value === undefined || value === null) {
       return value;
     }

@@ -1,3 +1,4 @@
+import type { AuthenticatedRequest } from '../types/authenticated-request';
 import {
     Injectable,
     CanActivate,
@@ -21,7 +22,7 @@ export class JwtAuthGuard implements CanActivate {
             return true;
         }
 
-        const request = context.switchToHttp().getRequest();
+        const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
         const user = request.user;
 
         // User must be authenticated

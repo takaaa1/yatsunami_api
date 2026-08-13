@@ -50,7 +50,10 @@ export interface SanitizeUserInputOptions {
   maxLength?: number;
 }
 
-export function sanitizeUserInput(raw: unknown, options: SanitizeUserInputOptions = {}): string {
+export function sanitizeUserInput(
+  raw: unknown,
+  options: SanitizeUserInputOptions = {},
+): string {
   if (raw === null || raw === undefined) {
     return '';
   }
@@ -74,7 +77,9 @@ export function sanitizeUserInput(raw: unknown, options: SanitizeUserInputOption
 
   const defaultCap = DEFAULT_MAX[kind];
   const cap =
-    options.maxLength !== undefined ? Math.min(options.maxLength, defaultCap) : defaultCap;
+    options.maxLength !== undefined
+      ? Math.min(options.maxLength, defaultCap)
+      : defaultCap;
 
   if (kind === 'email') {
     s = stripBidiAndBom(s.trim().toLowerCase());

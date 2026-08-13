@@ -25,7 +25,9 @@ export class MailService {
     }
 
     async sendResetCode(email: string, code: string, name: string, language: string = 'pt-BR'): Promise<boolean> {
-        const expiration = this.configService.get('auth.resetPasswordExpirationMinutes');
+        const expiration =
+            this.configService.get<number>('auth.resetPasswordExpirationMinutes') ??
+            15;
 
         // Debug log (temporary)
         const mailHost = this.configService.get<string>('mail.host');
@@ -38,17 +40,21 @@ export class MailService {
         const html = this.getResetPasswordTemplate(code, name, language, expiration);
 
         try {
-            const info = await this.transporter.sendMail({
+            // `SentMessageInfo` é `any` no próprio @types/nodemailer; estreitamos
+            // para o único campo que lemos.
+            const info = (await this.transporter.sendMail({
                 from: `"${this.fromName}" <${this.fromEmail}>`,
                 to: email,
                 subject: subject,
                 html: html,
-            });
+            })) as { messageId?: string };
 
             this.logger.log(`Email sent: ${info.messageId}`);
             return true;
-        } catch (error: any) {
-            this.logger.error(`Failed to send email: ${error.message}`);
+        } catch (error) {
+            this.logger.error(
+                `Failed to send email: ${error instanceof Error ? error.message : String(error)}`,
+            );
             return false;
         }
     }
