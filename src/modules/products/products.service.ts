@@ -19,22 +19,22 @@ export class ProductsService {
         const { variedades, ...productData } = createProductDto;
 
         const data: Prisma.ProdutoCreateInput = {
-            nome: productData.nome as any,
-            preco: (productData.preco ?? null) as any,
-            ingredientes: productData.ingredientes as any,
+            nome: productData.nome as unknown as Prisma.InputJsonValue,
+            preco: productData.preco ?? null,
+            ingredientes: productData.ingredientes as unknown as Prisma.InputJsonValue,
             quantidade: productData.quantidade,
             unidadeMedida: productData.unidadeMedida,
             tipoProduto: productData.tipoProduto,
-            categoria: productData.categoria as any,
-            observacoes: productData.observacoes as any,
+            categoria: productData.categoria as unknown as Prisma.InputJsonValue,
+            observacoes: productData.observacoes as unknown as Prisma.InputJsonValue,
             imagem: productData.imagem,
             abreviacao: productData.abreviacao,
             ativo: productData.ativo,
             variedades: variedades ? {
                 create: variedades.map(v => ({
-                    nome: v.nome as any,
+                    nome: v.nome as unknown as Prisma.InputJsonValue,
                     preco: v.preco,
-                    ingredientes: v.ingredientes as any,
+                    ingredientes: v.ingredientes as unknown as Prisma.InputJsonValue,
                     quantidade: v.quantidade,
                     unidadeMedida: v.unidadeMedida,
                     tipoProduto: v.tipoProduto,
@@ -61,7 +61,7 @@ export class ProductsService {
                 await this.storageService.deleteFile('produtos', [filePath]);
             }
         } catch (error) {
-            console.warn(`Failed to delete old product image: ${error.message}`);
+            console.warn(`Failed to delete old product image: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -99,23 +99,23 @@ export class ProductsService {
         }
 
         const data: Prisma.ProdutoUpdateInput = {
-            nome: productData.nome as any,
-            preco: (productData.preco ?? null) as any,
-            ingredientes: productData.ingredientes as any,
+            nome: productData.nome as unknown as Prisma.InputJsonValue,
+            preco: productData.preco ?? null,
+            ingredientes: productData.ingredientes as unknown as Prisma.InputJsonValue,
             quantidade: productData.quantidade,
             unidadeMedida: productData.unidadeMedida,
             tipoProduto: productData.tipoProduto,
-            categoria: productData.categoria as any,
-            observacoes: productData.observacoes as any,
+            categoria: productData.categoria as unknown as Prisma.InputJsonValue,
+            observacoes: productData.observacoes as unknown as Prisma.InputJsonValue,
             imagem: productData.imagem,
             abreviacao: productData.abreviacao,
             ativo: productData.ativo,
             variedades: variedades ? {
                 deleteMany: {}, // Simpler to recreate
                 create: variedades.map(v => ({
-                    nome: v.nome as any,
+                    nome: v.nome as unknown as Prisma.InputJsonValue,
                     preco: v.preco,
-                    ingredientes: v.ingredientes as any,
+                    ingredientes: v.ingredientes as unknown as Prisma.InputJsonValue,
                     quantidade: v.quantidade,
                     unidadeMedida: v.unidadeMedida,
                     tipoProduto: v.tipoProduto,

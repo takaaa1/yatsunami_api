@@ -55,7 +55,7 @@ export class CreateProductDto {
     @IsOptional()
     @Sanitized('plain', 2048)
     @IsString()
-    @ValidateIf((o) => o.imagem !== '' && o.imagem !== null && o.imagem !== undefined)
+    @ValidateIf((o: { imagem?: string | null }) => o.imagem !== '' && o.imagem !== null && o.imagem !== undefined)
     @IsUrl()
     imagem?: string;
 
