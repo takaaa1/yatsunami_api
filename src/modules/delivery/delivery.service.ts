@@ -8,6 +8,7 @@ import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { CronLockService } from '../../common/cron/cron-lock.service';
 import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
+import { RouteStop, asRouteStops, stopCourierId, stopOrderIds } from './route-stop.types';
 
 @Injectable()
 export class DeliveryService {
@@ -418,7 +419,7 @@ export class DeliveryService {
         return updated;
     }
 
-    private paradaEndereco(s: any): string | null {
+    private paradaEndereco(s: RouteStop | string): string | null {
         if (typeof s === 'string') {
             const t = s.trim();
             return t.length > 5 ? t : null;
@@ -430,7 +431,7 @@ export class DeliveryService {
         return null;
     }
 
-    private dwellFromParada(s: any): number {
+    private dwellFromParada(s: RouteStop): number {
         const d = s?.serviceStopSeconds;
         if (typeof d === 'number' && Number.isFinite(d) && d > 0) {
             return d;
@@ -454,7 +455,7 @@ export class DeliveryService {
     /**
      * Agrupa paradas consecutivas com o mesmo entregador (para multi-rota: um Directions por trecho).
      */
-    private buildCourierSegments(nomesParadas: any[]): { courierId: number; indices: number[]; addresses: string[] }[] {
+    private buildCourierSegments(nomesParadas: RouteStop[]): { courierId: number; indices: number[]; addresses: string[] }[] {
         const segments: { courierId: number; indices: number[]; addresses: string[] }[] = [];
         let current: { courierId: number; indices: number[]; addresses: string[] } | null = null;
         for (let i = 0; i < nomesParadas.length; i++) {
@@ -496,7 +497,7 @@ export class DeliveryService {
         return originAddress.trim();
     }
 
-    private async recalculateHorariosAfterReorder(nomesParadas: any[], departureTime?: string): Promise<string[]> {
+    private async recalculateHorariosAfterReorder(nomesParadas: RouteStop[], departureTime?: string): Promise<string[]> {
         const originAddress = await this.resolveOriginAddressForRouting();
         const segments = this.buildCourierSegments(nomesParadas);
         const horariosChegada: string[] = new Array(nomesParadas.length);
@@ -540,7 +541,7 @@ export class DeliveryService {
         return horariosChegada;
     }
 
-    private async syncOrderEtasFromStops(stops: any[], horariosChegada: string[]): Promise<void> {
+    private async syncOrderEtasFromStops(stops: RouteStop[], horariosChegada: string[]): Promise<void> {
         await Promise.all(
             stops.map(async (stop, index) => {
                 const arrivalIso = horariosChegada[index];
@@ -640,7 +641,7 @@ export class DeliveryService {
             const route = await this.prisma.rotaEntrega.findUnique({ where: { formId } });
             if (!route?.nomesParadas) return [];
 
-            const orderIds = this.collectOrderIds(route.nomesParadas as any[], courierId);
+            const orderIds = this.collectOrderIds(asRouteStops(route.nomesParadas), courierId);
             if (orderIds.length === 0) return [];
 
             const stale = await this.prisma.pedidoEncomenda.findMany({
@@ -669,22 +670,13 @@ export class DeliveryService {
     }
 
     /** Extrai os orderIds das paradas, opcionalmente filtrando por entregador. */
-    private collectOrderIds(stops: any[], courierId?: number): number[] {
+    private collectOrderIds(stops: RouteStop[], courierId?: number): number[] {
         const relevant =
             courierId !== undefined
-                ? stops.filter((stop) => Number(stop?.courierId ?? 1) === Number(courierId))
+                ? stops.filter((stop) => stopCourierId(stop) === Number(courierId))
                 : stops;
 
-        return Array.from(
-            new Set(
-                relevant.flatMap((stop) => {
-                    const ids: number[] = [];
-                    if (stop?.orderId) ids.push(Number(stop.orderId));
-                    if (Array.isArray(stop?.orderIds)) ids.push(...stop.orderIds.map((id: any) => Number(id)));
-                    return ids;
-                }),
-            ),
-        ).filter(Boolean);
+        return Array.from(new Set(relevant.flatMap((stop) => stopOrderIds(stop))));
     }
 
     async markDeliveryComplete(formId: number, paradaIdx: number) {
