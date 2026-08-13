@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { DeliveryService } from './delivery.service';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @WebSocketGateway({ cors: true })
 export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -17,11 +18,14 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly etaThrottle = new Map<string, number>(); // Changed key to string for "formId_courierId"
     private readonly THROTTLE_MS = 30000; // 30 seconds
 
-    constructor(private readonly deliveryService: DeliveryService) { }
+    constructor(
+        private readonly deliveryService: DeliveryService,
+        private readonly realtimeGateway: RealtimeGateway,
+    ) { }
 
-    handleConnection(_client: Socket) { }
+    handleConnection() { }
 
-    handleDisconnect(_client: Socket) { }
+    handleDisconnect() { }
 
     @SubscribeMessage('updateLocation')
     async handleLocationUpdate(
@@ -29,12 +33,23 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         @MessageBody() payload: UpdateLocationDto,
     ) {
         // 1. Save to DB
-        await this.deliveryService.updateLocation(payload);
+        const result = await this.deliveryService.updateLocation(payload);
 
         // 2. Broadcast location to room
         this.server.to(`tracking_${payload.formId}`).emit('locationUpdate', payload);
 
-        // 3. Handle Dynamic ETA
+        // 3. Rastreio retomado automaticamente: reavisa clientes que os pedidos voltaram a "em entrega"
+        if (result.reactivatedOrderIds?.length) {
+            this.broadcastSharingStatus(payload.formId, true, {
+                userId: payload.userId ?? null,
+                courierId: payload.courierId,
+            });
+            for (const id of result.reactivatedOrderIds) {
+                this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', { id, emEntrega: true });
+            }
+        }
+
+        // 4. Handle Dynamic ETA
         await this.handleDynamicETA(payload.formId, payload.courierId);
     }
 
@@ -52,7 +67,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
                 if (dynamicEtas) {
                     this.server.to(`tracking_${formId}`).emit('etaUpdate', dynamicEtas);
                 }
-            } catch (error) {
+            } catch {
                 // Silently fail to not block location updates
             }
         }
@@ -63,7 +78,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         @ConnectedSocket() client: Socket,
         @MessageBody('formId') formId: number,
     ) {
-        client.join(`tracking_${formId}`);
+        void client.join(`tracking_${formId}`);
         return { event: 'joinedTracking', data: formId };
     }
 
@@ -72,7 +87,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         @ConnectedSocket() client: Socket,
         @MessageBody('formId') formId: number,
     ) {
-        client.leave(`tracking_${formId}`);
+        void client.leave(`tracking_${formId}`);
         return { event: 'leftTracking', data: formId };
     }
 

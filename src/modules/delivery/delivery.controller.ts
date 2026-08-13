@@ -66,6 +66,16 @@ export class DeliveryController {
     async updateLocation(@Body() updateLocationDto: UpdateLocationDto) {
         const result = await this.deliveryService.updateLocation(updateLocationDto);
         this.trackingGateway.server.to(`tracking_${updateLocationDto.formId}`).emit('locationUpdate', updateLocationDto);
+
+        // Rastreio retomado automaticamente: avisa os clientes para o botão "Rastrear" voltar na hora
+        if (result.reactivatedOrderIds?.length) {
+            this.trackingGateway.broadcastSharingStatus(updateLocationDto.formId, true, {
+                userId: updateLocationDto.userId ?? null,
+                courierId: updateLocationDto.courierId,
+            });
+            this.broadcastOrdersEmEntrega(result.reactivatedOrderIds, true);
+        }
+
         await this.trackingGateway.handleDynamicETA(updateLocationDto.formId, updateLocationDto.courierId);
         return result;
     }

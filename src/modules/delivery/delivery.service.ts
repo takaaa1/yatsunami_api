@@ -13,6 +13,10 @@ import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 export class DeliveryService {
     private readonly logger = new Logger(DeliveryService.name);
 
+    /** Controle de throttle da auto-recuperação de rastreio, por `formId_courierId`. */
+    private readonly reactivationThrottle = new Map<string, number>();
+    private static readonly REACTIVATION_THROTTLE_MS = 30_000;
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly routesService: RoutesService,
@@ -132,7 +136,7 @@ export class DeliveryService {
                 clusters.push(allPointsWithCoords);
             } else {
                 let centroids = allPointsWithCoords.slice(0, k).map(p => ({ lat: p.lat, lng: p.lng }));
-                let assignments = new Array(allPointsWithCoords.length).fill(0);
+                const assignments = new Array(allPointsWithCoords.length).fill(0);
 
                 // Iterations
                 for (let iter = 0; iter < 10; iter++) {
@@ -571,45 +575,116 @@ export class DeliveryService {
     }
 
     async updateLocation(updateLocationDto: UpdateLocationDto) {
-        const { formId, latitude, longitude, courierId, userId } = updateLocationDto;
+        const { formId, latitude, longitude, userId } = updateLocationDto;
+        // courierId nunca deve ficar nulo: registros órfãos (courier_id NULL) faziam a
+        // limpeza automática afetar a rota inteira e nunca removiam a própria linha.
+        const courierId = updateLocationDto.courierId ?? 1;
 
         if (userId) {
-            this.logger.debug(`Location update from user ${userId} for form ${formId}, courier route ${courierId || 1}`);
-        }
-
-        const whereClause: any = { formId };
-        if (courierId !== undefined) {
-            whereClause.courierId = courierId;
+            this.logger.debug(`Location update from user ${userId} for form ${formId}, courier route ${courierId}`);
         }
 
         // Find existing location entry for this courier/form
-        // Each courier route (1, 2, etc.) has its own location record
+        // Each courier route (1, 2, etc.) has its own location record.
+        // Inclui linhas legadas com courierId NULL para que sejam normalizadas.
         const existing = await this.prisma.entregadorLocalizacao.findFirst({
-            where: whereClause
+            where: {
+                formId,
+                OR: [{ courierId }, { courierId: null }],
+            },
+            orderBy: { atualizadoEm: 'desc' },
         });
 
-        if (existing) {
-            return this.prisma.entregadorLocalizacao.update({
+        const location = existing
+            ? await this.prisma.entregadorLocalizacao.update({
                 where: { id: existing.id },
                 data: {
                     latitude,
                     longitude,
                     atualizadoEm: new Date(),
-                    courierId, // Update courierId just in case it was null before but now we know it
+                    courierId,
                     ...(userId && { userId }),
-                }
+                },
+            })
+            : await this.prisma.entregadorLocalizacao.create({
+                data: {
+                    formId,
+                    latitude,
+                    longitude,
+                    courierId,
+                    userId,
+                },
             });
-        }
 
-        return this.prisma.entregadorLocalizacao.create({
-            data: {
-                formId,
-                latitude,
-                longitude,
-                courierId,
-                userId,
-            },
-        });
+        // Auto-recuperação: se o rastreio foi encerrado por engano (queda de sinal,
+        // limpeza automática, app reiniciado) e a localização voltou a chegar,
+        // os pedidos precisam voltar a aparecer como "em entrega" para os clientes.
+        const reactivatedOrderIds = await this.reactivateSharingIfNeeded(formId, courierId);
+
+        return { ...location, reactivatedOrderIds };
+    }
+
+    /**
+     * Restaura `emEntrega` dos pedidos da rota quando a localização volta a ser
+     * recebida mas o compartilhamento consta como parado no banco.
+     * Throttled por form+courier para não consultar a cada ping de localização.
+     */
+    private async reactivateSharingIfNeeded(formId: number, courierId: number): Promise<number[]> {
+        const key = `${formId}_${courierId}`;
+        const now = Date.now();
+        const lastRun = this.reactivationThrottle.get(key) ?? 0;
+        if (now - lastRun < DeliveryService.REACTIVATION_THROTTLE_MS) return [];
+        this.reactivationThrottle.set(key, now);
+
+        try {
+            const route = await this.prisma.rotaEntrega.findUnique({ where: { formId } });
+            if (!route?.nomesParadas) return [];
+
+            const orderIds = this.collectOrderIds(route.nomesParadas as any[], courierId);
+            if (orderIds.length === 0) return [];
+
+            const stale = await this.prisma.pedidoEncomenda.findMany({
+                where: {
+                    id: { in: orderIds },
+                    emEntrega: false,
+                    statusPagamento: { notIn: ['entregue', 'cancelado'] },
+                },
+                select: { id: true },
+            });
+            if (stale.length === 0) return [];
+
+            const staleIds = stale.map((o) => o.id);
+            await this.prisma.pedidoEncomenda.updateMany({
+                where: { id: { in: staleIds } },
+                data: { emEntrega: true },
+            });
+            this.logger.log(
+                `Rastreio reativado automaticamente para form ${formId} / courier ${courierId} (${staleIds.length} pedidos)`,
+            );
+            return staleIds;
+        } catch (error) {
+            this.logger.error(`Falha ao reativar rastreio do form ${formId}: ${error.message}`);
+            return [];
+        }
+    }
+
+    /** Extrai os orderIds das paradas, opcionalmente filtrando por entregador. */
+    private collectOrderIds(stops: any[], courierId?: number): number[] {
+        const relevant =
+            courierId !== undefined
+                ? stops.filter((stop) => Number(stop?.courierId ?? 1) === Number(courierId))
+                : stops;
+
+        return Array.from(
+            new Set(
+                relevant.flatMap((stop) => {
+                    const ids: number[] = [];
+                    if (stop?.orderId) ids.push(Number(stop.orderId));
+                    if (Array.isArray(stop?.orderIds)) ids.push(...stop.orderIds.map((id: any) => Number(id)));
+                    return ids;
+                }),
+            ),
+        ).filter(Boolean);
     }
 
     async markDeliveryComplete(formId: number, paradaIdx: number) {
@@ -837,12 +912,17 @@ export class DeliveryService {
             });
         }
 
-        // Clear location record to indicate tracking stopped
-        if (courierId !== undefined) {
-            await this.prisma.entregadorLocalizacao.deleteMany({
-                where: { formId, courierId }
-            });
-        }
+        // Clear location record to indicate tracking stopped.
+        // Sem courierId, o pedido é "parar tudo desta rota" — inclusive linhas legadas
+        // com courier_id NULL, que antes ficavam órfãs e reativavam a limpeza a cada minuto.
+        await this.prisma.entregadorLocalizacao.deleteMany({
+            where: courierId !== undefined
+                ? { formId, OR: [{ courierId }, { courierId: null }] }
+                : { formId },
+        });
+
+        // Libera o throttle para que uma retomada de localização reative o rastreio na hora
+        this.reactivationThrottle.delete(`${formId}_${courierId ?? 1}`);
 
         return { success: true, updatedCount: orderIds.length, orderIds };
     }
@@ -933,31 +1013,38 @@ export class DeliveryService {
         }
     }
 
+    /**
+     * Remove apenas as linhas de localização abandonadas (app fechado, aparelho desligado).
+     *
+     * IMPORTANTE: esta rotina NÃO encerra a entrega. Antes ela chamava `stopRouteSharing`
+     * com um limiar de 2 minutos — menor que a própria parada planejada de 5 min
+     * (`serviceStopSeconds`) — então zerava `emEntrega` de toda a rota a cada parada do
+     * entregador, fazendo o botão "Rastrear" sumir para os clientes sem nenhuma
+     * possibilidade de recuperação automática. `emEntrega` agora só muda por ação
+     * explícita do entregador, por conclusão da parada ou pela auto-recuperação
+     * em `updateLocation`.
+     */
     @Cron(CronExpression.EVERY_MINUTE)
     async handleStaleTracking() {
         await this.cronLockService.withLock(
             CRON_LOCK_KEYS.STALE_TRACKING,
             'handleStaleTracking',
             async () => {
-                const STALE_THRESHOLD_MINUTES = 2;
+                const STALE_THRESHOLD_MINUTES = 20;
                 const staleDate = new Date();
                 staleDate.setMinutes(staleDate.getMinutes() - STALE_THRESHOLD_MINUTES);
 
-                const staleSessions = await this.prisma.entregadorLocalizacao.findMany({
+                const { count } = await this.prisma.entregadorLocalizacao.deleteMany({
                     where: {
                         atualizadoEm: { lt: staleDate },
                     },
                 });
 
-                if (staleSessions.length > 0) {
-                    this.logger.log(`Cleaning up ${staleSessions.length} stale tracking sessions (inactive for ${STALE_THRESHOLD_MINUTES}min)`);
-                    for (const session of staleSessions) {
-                        try {
-                            await this.stopRouteSharing(session.formId, session.courierId ?? undefined);
-                        } catch (error) {
-                            this.logger.error(`Failed to cleanup stale tracking for form ${session.formId}: ${error.message}`);
-                        }
-                    }
+                if (count > 0) {
+                    this.logger.log(
+                        `Removidas ${count} localizações abandonadas (sem atualização há ${STALE_THRESHOLD_MINUTES}min). ` +
+                        `Status de entrega dos pedidos preservado.`,
+                    );
                 }
             },
         );
