@@ -211,7 +211,9 @@ export class AuthService {
         this.logger.log(`New user registered: ${emailLower}`);
 
         // Notify admins (push + in-app) — fire-and-forget
-        this.notifyAdminsNewUser({ id: user.id, nome: user.nome, email: user.email });
+        void this.notifyAdminsNewUser({ id: user.id, nome: user.nome, email: user.email }).catch(
+            (error) => this.logger.error(`Falha ao notificar admins do novo usuário: ${error}`),
+        );
 
         return {
             accessToken: this.generateToken(user),

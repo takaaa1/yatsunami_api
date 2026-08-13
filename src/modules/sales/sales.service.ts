@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSaleDto, DiscountType } from './dto/create-sale.dto';
 import { Prisma } from '@prisma/client';
@@ -37,8 +37,8 @@ export class SalesService {
                     throw new NotFoundException(`Produto com ID ${item.produtoId} não encontrado`);
                 }
 
-                let precoUnitario = new Prisma.Decimal(item.precoUnitario);
-                let variedadeId = item.variedadeId || null;
+                const precoUnitario = new Prisma.Decimal(item.precoUnitario);
+                const variedadeId = item.variedadeId || null;
 
                 if (variedadeId) {
                     const variedade = produto.variedades.find(v => v.id === variedadeId);
@@ -48,7 +48,7 @@ export class SalesService {
                 }
 
                 const quantidade = new Prisma.Decimal(item.quantidade);
-                let valorDesconto = new Prisma.Decimal(item.valorDesconto || 0);
+                const valorDesconto = new Prisma.Decimal(item.valorDesconto || 0);
                 let subtotal = precoUnitario.mul(quantidade);
 
                 // Apply per-unit discount * quantity

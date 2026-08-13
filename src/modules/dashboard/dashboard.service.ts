@@ -325,7 +325,7 @@ export class DashboardService {
         const result = {};
 
         // Initialize all months in the range
-        let current = new Date(chartStart);
+        const current = new Date(chartStart);
         while (current <= chartEnd) {
             const key = `${current.getMonth() + 1}/${current.getFullYear()}`;
             result[key] = { revenue: 0, expenses: 0 };

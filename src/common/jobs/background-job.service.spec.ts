@@ -1,6 +1,4 @@
 import { BackgroundJobService } from './background-job.service';
-
-import { BackgroundJobService } from './background-job.service';
 import { CronLockService } from '../cron/cron-lock.service';
 
 describe('BackgroundJobService', () => {

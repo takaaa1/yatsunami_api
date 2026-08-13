@@ -184,7 +184,7 @@ export class OrdersService {
             }
 
             let precoUnitario = produto.preco ? Number(produto.preco) : 0;
-            let variedadeId = item.variedadeId;
+            const variedadeId = item.variedadeId;
 
             if (variedadeId) {
                 const variedade = produto.variedades.find(v => v.id === variedadeId);
@@ -662,7 +662,7 @@ export class OrdersService {
                 }
 
                 let precoUnitario = produto.preco ? Number(produto.preco) : 0;
-                let variedadeId = item.variedadeId;
+                const variedadeId = item.variedadeId;
 
                 if (variedadeId) {
                     const variedade = produto.variedades.find(v => v.id === variedadeId);
@@ -965,6 +965,7 @@ export class OrdersService {
         return updatedOrder;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- trilha de auditoria ainda não gravada nesta ação (ver confirmPayment)
     async revertPayment(id: number, adminUserId: string) {
         const order = await this.prisma.pedidoEncomenda.findUnique({
             where: { id },
@@ -1017,6 +1018,7 @@ export class OrdersService {
         return updatedOrder;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- trilha de auditoria ainda não gravada nesta ação (ver confirmPayment)
     async rejectPayment(id: number, adminUserId: string) {
         const order = await this.prisma.pedidoEncomenda.findUnique({
             where: { id },
@@ -1075,6 +1077,7 @@ export class OrdersService {
         return updatedOrder;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- trilha de auditoria ainda não gravada nesta ação (ver confirmPayment)
     async cancelOrder(id: number, adminUserId: string) {
         const order = await this.prisma.pedidoEncomenda.findUnique({
             where: { id },
@@ -1195,6 +1198,7 @@ export class OrdersService {
         return updatedOrder;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- trilha de auditoria ainda não gravada nesta ação (ver confirmPayment)
     async revertCancellation(id: number, adminUserId: string) {
         const order = await this.prisma.pedidoEncomenda.findUnique({
             where: { id },

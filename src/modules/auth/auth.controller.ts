@@ -117,7 +117,7 @@ export class AuthController {
     @ApiOperation({ summary: 'Obter dados mínimos do token JWT' })
     @ApiResponse({ status: 200, description: 'Dados do token' })
     @ApiResponse({ status: 401, description: 'Não autorizado' })
-    async me(@CurrentUser() user: any) {
+    me(@CurrentUser() user: any) {
         return user;
     }
 

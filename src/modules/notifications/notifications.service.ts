@@ -93,7 +93,6 @@ export class NotificationsService {
                             pedidoEncomendaId: data.pedidoEncomendaId,
                             tipo: data.tipo || 'user',
                         },
-                        // @ts-ignore - Required for EAS
                         projectId: process.env.EXPO_PROJECT_ID,
                     } as any,
                 ];
@@ -204,7 +203,6 @@ export class NotificationsService {
                         pedidoEncomendaId: data.pedidoEncomendaId,
                         tipo: data.tipo || 'admin',
                     },
-                    // @ts-ignore - Required for EAS
                     projectId: process.env.EXPO_PROJECT_ID,
                 } as any);
             }

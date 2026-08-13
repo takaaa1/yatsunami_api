@@ -58,7 +58,6 @@ export class QrParserService {
         const nfe = jsonObj['nfeProc']?.['NFe'] || jsonObj['NFe'];
         const infNfe = nfe?.['infNFe'];
         const emit = infNfe?.['emit'];
-        const total = infNfe?.['total']?.['ICMSTot'];
         const det = Array.isArray(infNfe?.['det']) ? infNfe['det'] : [infNfe?.['det']].filter(Boolean);
 
         const itens = det.map((d: any) => ({

@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 export default () => ({
     port: parseInt(process.env.PORT || '3000', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
@@ -14,7 +16,7 @@ export default () => ({
     },
 
     storage: {
-        uploadsPath: process.env.UPLOADS_PATH || require('path').join(process.cwd(), 'uploads'),
+        uploadsPath: process.env.UPLOADS_PATH || path.join(process.cwd(), 'uploads'),
         /** `r2` força R2; `local` força disco; vazio = R2 se credenciais existirem */
         backend: process.env.STORAGE_BACKEND || null,
     },

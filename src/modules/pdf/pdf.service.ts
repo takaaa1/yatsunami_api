@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- pdfmake não expõe tipos/ESM para este caminho interno
 const PdfPrinter = require('pdfmake/js/Printer').default;
 
 @Injectable()
@@ -26,7 +27,9 @@ export class PdfService {
                 const chunks: Buffer[] = [];
                 pdfDoc.on('data', (chunk) => chunks.push(chunk));
                 pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
-                pdfDoc.on('error', (err) => reject(err));
+                pdfDoc.on('error', (err) =>
+                    reject(err instanceof Error ? err : new Error(String(err))),
+                );
                 pdfDoc.end();
             });
         } catch (error) {
@@ -83,7 +86,6 @@ export class PdfService {
             }
         }
 
-        const hasDiscounts = totalItemsDiscount > 0 || globalDiscountValue > 0;
 
         // Build totals section
         const totalsStack: any[] = [];

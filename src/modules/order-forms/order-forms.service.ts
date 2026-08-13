@@ -3,7 +3,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderFormDto, UpdateOrderFormDto } from './dto';
 import { SalesService } from '../sales/sales.service';
-import { DiscountType } from '../sales/dto/create-sale.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BackgroundJobService } from '../../common/jobs/background-job.service';
 import { CronLockService } from '../../common/cron/cron-lock.service';
@@ -197,7 +196,7 @@ export class OrderFormsService {
     async update(id: number, updateDto: UpdateOrderFormDto, adminUserId?: string) {
         await this.findOne(id); // Ensure it exists
 
-        const item = await this.prisma.dataEncomenda.update({
+        await this.prisma.dataEncomenda.update({
             where: { id },
             data: {
                 ...(updateDto.data_entrega && { dataEntrega: new Date(updateDto.data_entrega) }),

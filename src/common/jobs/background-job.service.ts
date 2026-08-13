@@ -43,12 +43,14 @@ export class BackgroundJobService {
             return;
         }
 
-        setImmediate(async () => {
-            try {
-                await fn();
-            } catch (error) {
-                this.logger.error(`Background job "${name}" failed: ${error}`);
-            }
+        setImmediate(() => {
+            void (async () => {
+                try {
+                    await fn();
+                } catch (error) {
+                    this.logger.error(`Background job "${name}" failed: ${error}`);
+                }
+            })();
         });
     }
 
@@ -81,7 +83,9 @@ export class BackgroundJobService {
         void this.cronLockService.withLock(
             CRON_LOCK_KEYS.BACKGROUND_JOB_PURGE,
             'purgeExpiredJobs',
-            async () => {
+            // Limpeza puramente em memória — sem I/O, logo sem `await`;
+            // `withLock` espera uma função que devolva Promise.
+            () => {
                 const cutoff = Date.now() - JOB_TTL_MS;
                 let removed = 0;
 
@@ -96,6 +100,7 @@ export class BackgroundJobService {
                 if (removed > 0) {
                     this.logger.log(`Purged ${removed} expired background job(s)`);
                 }
+                return Promise.resolve();
             },
         );
     }

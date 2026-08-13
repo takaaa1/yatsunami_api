@@ -38,7 +38,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         @MessageBody('table') table: string,
     ) {
         if (!table) return;
-        client.join(`table:${table}`);
+        void client.join(`table:${table}`);
         return { event: 'joinedTable', data: table };
     }
 
@@ -48,7 +48,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         @MessageBody('table') table: string,
     ) {
         if (!table) return;
-        client.leave(`table:${table}`);
+        void client.leave(`table:${table}`);
         return { event: 'leftTable', data: table };
     }
 

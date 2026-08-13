@@ -20,6 +20,12 @@ const DEFAULT_MAX: Record<UserInputSanitizeKind, number> = {
   numeric: 64,
 };
 
+/*
+ * Este módulo existe justamente para remover caracteres de controle da entrada
+ * do usuário, então as classes de controle nas regex abaixo são intencionais.
+ */
+/* eslint-disable no-control-regex */
+
 function stripNullBytes(s: string): string {
   return s.replace(/\u0000/g, '');
 }
@@ -78,7 +84,7 @@ export function sanitizeUserInput(raw: unknown, options: SanitizeUserInputOption
 
   if (kind === 'numeric') {
     s = stripBidiAndBom(s);
-    s = s.replace(/[^\d.,\-]/g, '');
+    s = s.replace(/[^\d.,-]/g, '');
     return s.length > cap ? s.slice(0, cap) : s;
   }
 

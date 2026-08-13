@@ -86,7 +86,7 @@ export class RoutesService {
                 waypoints.length === 0
                     ? []
                     : optimizedOrder.map((idx) => {
-                        const raw = inputDwellOk ? waypointDwellSeconds![idx] : defaultDwell;
+                        const raw = inputDwellOk ? waypointDwellSeconds[idx] : defaultDwell;
                         const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : defaultDwell;
                         return Math.max(0, n);
                     });
@@ -196,7 +196,7 @@ export class RoutesService {
             arrivalTimes.push(new Date(currentTimestamp));
 
             if (j < legs.length - 1) {
-                const raw = dwellOk ? waypointDwellSeconds![j] : defaultDwell;
+                const raw = dwellOk ? waypointDwellSeconds[j] : defaultDwell;
                 const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : defaultDwell;
                 currentTimestamp += Math.max(0, n) * 1000;
             }
