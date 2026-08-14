@@ -208,6 +208,13 @@ export class DeliveryController {
       paradaIdx,
     );
     this.trackingGateway.sendDeliveryUpdate(formId, paradaIdx);
+    // Espelha o POST: sem isto o cliente só via a reversão ao reabrir a tela.
+    for (const id of result.orderIds) {
+      this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', {
+        id,
+        emEntrega: result.emEntrega,
+      });
+    }
     return result;
   }
 

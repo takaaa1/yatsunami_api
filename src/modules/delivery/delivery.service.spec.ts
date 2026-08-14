@@ -324,4 +324,75 @@ describe('DeliveryService — rastreio de entrega', () => {
       expect(prisma.rotaEntrega.findUnique).toHaveBeenCalledTimes(3); // 2 pings + 1 do stopRouteSharing
     });
   });
+
+  /**
+   * Reverter uma parada concluída gravava `emEntrega: true` incondicionalmente.
+   * Com o compartilhamento desligado o cliente voltava a ver a tag ENTREGANDO e
+   * o botão "Rastrear Entrega" — que abria um mapa sem entregador nenhum.
+   */
+  describe('unmarkDeliveryComplete', () => {
+    const pendingOrder = {
+      id: 101,
+      dataPagamento: null,
+      comprovanteUrl: null,
+    };
+
+    beforeEach(() => {
+      prisma.entregaConcluida.deleteMany.mockResolvedValue({ count: 1 });
+      prisma.pedidoEncomenda.findMany.mockResolvedValue([pendingOrder]);
+    });
+
+    it('sem compartilhamento ativo, não devolve o pedido para em entrega', async () => {
+      prisma.entregadorLocalizacao.findFirst.mockResolvedValue(null);
+
+      const result = await service.unmarkDeliveryComplete(10, 0);
+
+      expect(prisma.pedidoEncomenda.update).toHaveBeenCalledWith({
+        where: { id: 101 },
+        data: { statusPagamento: 'pendente', emEntrega: false },
+      });
+      expect(result.emEntrega).toBe(false);
+      expect(result.orderIds).toEqual([101]);
+    });
+
+    it('com compartilhamento ativo, devolve o pedido para em entrega', async () => {
+      prisma.entregadorLocalizacao.findFirst.mockResolvedValue({
+        id: 1,
+        formId: 10,
+        courierId: 1,
+      });
+
+      const result = await service.unmarkDeliveryComplete(10, 0);
+
+      expect(prisma.pedidoEncomenda.update).toHaveBeenCalledWith({
+        where: { id: 101 },
+        data: { statusPagamento: 'pendente', emEntrega: true },
+      });
+      expect(result.emEntrega).toBe(true);
+    });
+
+    it('procura a sessão do entregador da parada, tolerando courier_id nulo', async () => {
+      prisma.entregadorLocalizacao.findFirst.mockResolvedValue(null);
+
+      await service.unmarkDeliveryComplete(10, 2); // parada do entregador 2
+
+      expect(prisma.entregadorLocalizacao.findFirst).toHaveBeenCalledWith({
+        where: { formId: 10, OR: [{ courierId: 2 }, { courierId: null }] },
+      });
+    });
+
+    it('preserva o status de pagamento já confirmado', async () => {
+      prisma.entregadorLocalizacao.findFirst.mockResolvedValue(null);
+      prisma.pedidoEncomenda.findMany.mockResolvedValue([
+        { id: 101, dataPagamento: new Date(), comprovanteUrl: null },
+      ]);
+
+      await service.unmarkDeliveryComplete(10, 0);
+
+      expect(prisma.pedidoEncomenda.update).toHaveBeenCalledWith({
+        where: { id: 101 },
+        data: { statusPagamento: 'confirmado', emEntrega: false },
+      });
+    });
+  });
 });

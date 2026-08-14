@@ -850,11 +850,26 @@ export class DeliveryService {
     const route = await this.prisma.rotaEntrega.findUnique({
       where: { formId },
     });
+    const orderIds: number[] = [];
+    let emEntrega = false;
+
     if (route?.nomesParadas) {
       const stops = asRouteStops(route.nomesParadas);
       const stop = stops[paradaIdx];
       const ids: number[] = stop ? stopOrderIds(stop) : [];
       if (ids.length > 0) {
+        // Só volta para "em entrega" se o entregador estiver mesmo compartilhando.
+        // Sem esta checagem, reverter uma parada devolvia a tag ENTREGANDO e o
+        // botão "Rastrear Entrega" ao cliente com o compartilhamento desligado —
+        // rastreio sem ninguém para rastrear.
+        const courierId = stop ? stopCourierId(stop) : 1;
+        const activeSession = await this.prisma.entregadorLocalizacao.findFirst(
+          {
+            where: { formId, OR: [{ courierId }, { courierId: null }] },
+          },
+        );
+        emEntrega = activeSession !== null;
+
         const orders = await this.prisma.pedidoEncomenda.findMany({
           where: { id: { in: ids } },
         });
@@ -867,13 +882,14 @@ export class DeliveryService {
           }
           await this.prisma.pedidoEncomenda.update({
             where: { id: order.id },
-            data: { statusPagamento: restoredStatus, emEntrega: true },
+            data: { statusPagamento: restoredStatus, emEntrega },
           });
+          orderIds.push(order.id);
         }
       }
     }
 
-    return result;
+    return { ...result, orderIds, emEntrega };
   }
 
   async getActiveTracking(formId: number, courierId: number) {
