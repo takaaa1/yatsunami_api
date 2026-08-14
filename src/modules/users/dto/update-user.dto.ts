@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { IsString, IsOptional, IsBoolean, IsIn } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -49,23 +50,23 @@ export class UpdateUserDto {
 
     @ApiPropertyOptional({ description: 'Array de endereços JSON' })
     @IsOptional()
-    @Transform(({ value }) => {
+    @Transform(({ value }: { value: unknown }) => {
         if (typeof value === 'string') {
-            try { return JSON.parse(value); } catch { return value; }
+            try { return JSON.parse(value) as Prisma.InputJsonValue; } catch { return value; }
         }
         return value;
     })
-    endereco?: any;
+    endereco?: Prisma.InputJsonValue;
 
     @ApiPropertyOptional({ example: true })
     @IsOptional()
     @IsBoolean()
-    @Transform(({ value }) => value === 'true' || value === true)
+    @Transform(({ value }: { value: unknown }) => value === 'true' || value === true)
     receberNotificacoes?: boolean;
 
     @ApiPropertyOptional({ example: true, description: 'Usuário ativo ou desativado' })
     @IsOptional()
     @IsBoolean()
-    @Transform(({ value }) => value === 'true' || value === true)
+    @Transform(({ value }: { value: unknown }) => value === 'true' || value === true)
     ativo?: boolean;
 }

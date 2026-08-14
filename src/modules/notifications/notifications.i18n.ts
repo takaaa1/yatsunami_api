@@ -148,7 +148,7 @@ export function buildNotificationMessage(
     }
 
     const interpolate = (str: string) =>
-        str.replace(/\{\{(\w+)\}\}/g, (_, k) => params[k] ?? '');
+        str.replace(/\{\{(\w+)\}\}/g, (_, k: string) => params[k] ?? '');
 
     return {
         title: interpolate(template.title),

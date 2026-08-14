@@ -453,32 +453,36 @@ export class PdfService {
                 { text: 'Variedade', style: 'tableHeader' },
                 { text: 'Total Qtd', style: 'tableHeader' },
               ],
-              ...Object.values(consolidated).map((item: ConsolidatedItem): TableCell[] => [
-                item.nome,
-                item.variedade,
-                { text: item.quantidade.toString(), alignment: 'center' },
-              ]),
+              ...Object.values(consolidated).map(
+                (item: ConsolidatedItem): TableCell[] => [
+                  item.nome,
+                  item.variedade,
+                  { text: item.quantidade.toString(), alignment: 'center' },
+                ],
+              ),
             ],
           },
           layout: 'lightHorizontalLines',
         },
         { text: '\n\n' },
         { text: 'Lista Detalhada por Cliente', style: 'subheader' },
-        ...orders.map((order: PdfOrder): Content => ({
-          stack: [
-            {
-              text: `Cliente: ${order.usuario?.nome}`,
-              bold: true,
-              margin: [0, 10, 0, 5],
-            },
-            {
-              ul: order.itens.map(
-                (item: PdfSaleItem) =>
-                  `${item.quantidade}x ${this.getLocalizedText(item.produto?.nome)} (${item.variedade ? this.getLocalizedText(item.variedade?.nome) : '-'})`,
-              ),
-            },
-          ],
-        })),
+        ...orders.map(
+          (order: PdfOrder): Content => ({
+            stack: [
+              {
+                text: `Cliente: ${order.usuario?.nome}`,
+                bold: true,
+                margin: [0, 10, 0, 5],
+              },
+              {
+                ul: order.itens.map(
+                  (item: PdfSaleItem) =>
+                    `${String(item.quantidade)}x ${this.getLocalizedText(item.produto?.nome)} (${item.variedade ? this.getLocalizedText(item.variedade?.nome) : '-'})`,
+                ),
+              },
+            ],
+          }),
+        ),
       ],
       styles: {
         header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] },

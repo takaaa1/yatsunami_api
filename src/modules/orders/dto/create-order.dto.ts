@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, IsArray, ValidateNested, IsNotEmpty, Min, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -58,7 +59,7 @@ export class CreateOrderDto {
 
     @ApiProperty({ example: { street: 'Rua A' }, description: 'Endereço de entrega', required: false })
     @IsOptional()
-    enderecoEntrega?: any;
+    enderecoEntrega?: Prisma.InputJsonValue;
 
     @ApiProperty({ example: '11:00', description: 'Horário de retirada na loja (HH:mm)', required: false })
     @IsOptional()

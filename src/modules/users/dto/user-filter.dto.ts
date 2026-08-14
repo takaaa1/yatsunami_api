@@ -20,7 +20,7 @@ export class UserFilterDto {
     @ApiPropertyOptional({ example: true, description: 'Filtrar por status ativo/inativo' })
     @IsOptional()
     @IsBoolean()
-    @Transform(({ value }) => {
+    @Transform(({ value }: { value: unknown }) => {
         if (value === 'true') return true;
         if (value === 'false') return false;
         return value;
@@ -30,7 +30,7 @@ export class UserFilterDto {
     @ApiPropertyOptional({ example: false, description: 'Excluídos são ocultos por padrão. Use true para listar somente usuários excluídos.' })
     @IsOptional()
     @IsBoolean()
-    @Transform(({ value }) => {
+    @Transform(({ value }: { value: unknown }) => {
         if (value === 'true') return true;
         if (value === 'false') return false;
         return value;

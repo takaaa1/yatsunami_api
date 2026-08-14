@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { IsEmail, IsString, MinLength, IsOptional, IsBoolean, IsIn } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -147,22 +148,22 @@ export class UpdateProfileDto {
 
     @ApiPropertyOptional({ description: 'Endereço (JSON)' })
     @IsOptional()
-    @Transform(({ value }) => {
+    @Transform(({ value }: { value: unknown }) => {
         if (typeof value === 'string') {
             try {
-                return JSON.parse(value);
+                return JSON.parse(value) as Prisma.InputJsonValue;
             } catch {
                 return value;
             }
         }
         return value;
     })
-    endereco?: any;
+    endereco?: Prisma.InputJsonValue;
 
     @ApiPropertyOptional({ example: true, description: 'Receber notificações' })
     @IsOptional()
     @IsBoolean()
-    @Transform(({ value }) => value === 'true' || value === true)
+    @Transform(({ value }: { value: unknown }) => value === 'true' || value === true)
     receberNotificacoes?: boolean;
 
     @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg', description: 'URL do avatar', nullable: true })

@@ -1,3 +1,4 @@
+import type { SignOptions } from 'jsonwebtoken';
 import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
@@ -15,7 +16,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
             inject: [ConfigService],
             useFactory: (config: ConfigService) => ({
                 secret: config.get<string>('jwt.secret') as string,
-                signOptions: { expiresIn: config.get<string>('jwt.expiration', '7d') as any },
+                signOptions: {
+                    // `expiresIn` é um template literal do jsonwebtoken (ex. '7d'),
+                    // não `string` — daí o cast explícito.
+                    expiresIn: config.get<string>(
+                        'jwt.expiration',
+                        '7d',
+                    ) as SignOptions['expiresIn'],
+                },
             }),
         }),
         NotificationsModule,

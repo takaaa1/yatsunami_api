@@ -30,7 +30,7 @@ export class OrdersService {
     private cronLockService: CronLockService,
   ) {}
 
-  private formatAddress(address: unknown): string | null {
+  private formatAddress(address: Prisma.InputJsonValue | undefined): string | null {
     if (!address) return null;
     if (typeof address === 'string') return address.trim();
 
@@ -286,7 +286,8 @@ export class OrdersService {
 
     // Defensive address formatting
     if (orderData.enderecoEntrega) {
-      orderData.enderecoEntrega = this.formatAddress(orderData.enderecoEntrega);
+      const formatted = this.formatAddress(orderData.enderecoEntrega);
+      if (formatted !== null) orderData.enderecoEntrega = formatted;
     }
 
     const horarioRetiradaDate =

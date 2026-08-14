@@ -1,285 +1,322 @@
+import { Prisma } from '@prisma/client';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma';
 import { Expo, ExpoPushMessage } from 'expo-server-sdk';
-import { buildNotificationMessage, SupportedLocale } from './notifications.i18n';
+import {
+  buildNotificationMessage,
+  SupportedLocale,
+} from './notifications.i18n';
 import { Cron } from '@nestjs/schedule';
 import { CronLockService } from '../../common/cron/cron-lock.service';
 import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 @Injectable()
 export class NotificationsService {
-    private expo: Expo;
-    private readonly logger = new Logger(NotificationsService.name);
+  private expo: Expo;
+  private readonly logger = new Logger(NotificationsService.name);
 
-    constructor(
-        private prisma: PrismaService,
-        private cronLockService: CronLockService,
+  constructor(
+    private prisma: PrismaService,
+    private cronLockService: CronLockService,
+  ) {
+    this.expo = new Expo({
+      accessToken: process.env.EXPO_ACCESS_TOKEN,
+    });
+  }
+
+  private async deduplicateNotification(
+    usuarioId: string,
+    chave: string,
+    pedidoDiretoId?: number,
+    pedidoEncomendaId?: number,
+    dataEncomendaId?: number,
+  ) {
+    if (!pedidoDiretoId && !pedidoEncomendaId && !dataEncomendaId) return;
+
+    const where: Prisma.NotificacaoWhereInput = {
+      usuarioId,
+      titulo: `${chave}.title`,
+    };
+    if (pedidoDiretoId) where.pedidoDiretoId = pedidoDiretoId;
+    if (pedidoEncomendaId) where.pedidoEncomendaId = pedidoEncomendaId;
+    if (dataEncomendaId) where.dataEncomendaId = dataEncomendaId;
+
+    await this.prisma.notificacao.deleteMany({ where });
+  }
+
+  async createAndSendNotification(data: {
+    usuarioId: string;
+    chave: string;
+    parametros: Record<string, string>;
+    dataEncomendaId?: number;
+    pedidoDiretoId?: number;
+    pedidoEncomendaId?: number;
+    tipo?: string;
+  }) {
+    // 0. Deduplicar: remover notificações antigas do mesmo pedido + mesmo status
+    await this.deduplicateNotification(
+      data.usuarioId,
+      data.chave,
+      data.pedidoDiretoId,
+      data.pedidoEncomendaId,
+      data.dataEncomendaId,
+    );
+
+    // 1. Salvar no banco (Inbox) com chave i18n
+    const notificacao = await this.prisma.notificacao.create({
+      data: {
+        usuarioId: data.usuarioId,
+        titulo: `${data.chave}.title`,
+        mensagem: `${data.chave}.message`,
+        parametros: data.parametros,
+        dataEncomendaId: data.dataEncomendaId,
+        pedidoDiretoId: data.pedidoDiretoId,
+        pedidoEncomendaId: data.pedidoEncomendaId,
+        tipo: data.tipo || 'user',
+      },
+    });
+
+    // 2. Buscar token, preferência e idioma do usuário
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: data.usuarioId },
+      select: { expoPushToken: true, receberNotificacoes: true, idioma: true },
+    });
+
+    if (
+      usuario?.receberNotificacoes &&
+      usuario?.expoPushToken &&
+      Expo.isExpoPushToken(usuario.expoPushToken)
     ) {
-        this.expo = new Expo({
-            accessToken: process.env.EXPO_ACCESS_TOKEN,
-        });
-    }
-
-    private async deduplicateNotification(
-        usuarioId: string,
-        chave: string,
-        pedidoDiretoId?: number,
-        pedidoEncomendaId?: number,
-        dataEncomendaId?: number,
-    ) {
-        if (!pedidoDiretoId && !pedidoEncomendaId && !dataEncomendaId) return;
-
-        const where: any = { usuarioId, titulo: `${chave}.title` };
-        if (pedidoDiretoId) where.pedidoDiretoId = pedidoDiretoId;
-        if (pedidoEncomendaId) where.pedidoEncomendaId = pedidoEncomendaId;
-        if (dataEncomendaId) where.dataEncomendaId = dataEncomendaId;
-
-        await this.prisma.notificacao.deleteMany({ where });
-    }
-
-    async createAndSendNotification(data: {
-        usuarioId: string;
-        chave: string;
-        parametros: Record<string, string>;
-        dataEncomendaId?: number;
-        pedidoDiretoId?: number;
-        pedidoEncomendaId?: number;
-        tipo?: string;
-    }) {
-        // 0. Deduplicar: remover notificações antigas do mesmo pedido + mesmo status
-        await this.deduplicateNotification(
-            data.usuarioId,
-            data.chave,
-            data.pedidoDiretoId,
-            data.pedidoEncomendaId,
-            data.dataEncomendaId,
+      try {
+        const locale = (
+          usuario.idioma === 'ja-JP' ? 'ja-JP' : 'pt-BR'
+        ) as SupportedLocale;
+        const { title, message } = buildNotificationMessage(
+          data.chave,
+          data.parametros,
+          locale,
         );
 
-        // 1. Salvar no banco (Inbox) com chave i18n
-        const notificacao = await this.prisma.notificacao.create({
+        const messages: ExpoPushMessage[] = [
+          {
+            to: usuario.expoPushToken,
+            sound: 'default',
+            title,
+            body: message,
             data: {
-                usuarioId: data.usuarioId,
-                titulo: `${data.chave}.title`,
-                mensagem: `${data.chave}.message`,
-                parametros: data.parametros,
-                dataEncomendaId: data.dataEncomendaId,
-                pedidoDiretoId: data.pedidoDiretoId,
-                pedidoEncomendaId: data.pedidoEncomendaId,
-                tipo: data.tipo || 'user',
+              notificacaoId: notificacao.id,
+              dataEncomendaId: data.dataEncomendaId,
+              pedidoDiretoId: data.pedidoDiretoId,
+              pedidoEncomendaId: data.pedidoEncomendaId,
+              tipo: data.tipo || 'user',
             },
-        });
+            projectId: process.env.EXPO_PROJECT_ID,
+          } as ExpoPushMessage & { projectId?: string },
+        ];
 
-        // 2. Buscar token, preferência e idioma do usuário
-        const usuario = await this.prisma.usuario.findUnique({
-            where: { id: data.usuarioId },
-            select: { expoPushToken: true, receberNotificacoes: true, idioma: true },
-        });
-
-        if (usuario?.receberNotificacoes && usuario?.expoPushToken && Expo.isExpoPushToken(usuario.expoPushToken)) {
-            try {
-                const locale = (usuario.idioma === 'ja-JP' ? 'ja-JP' : 'pt-BR') as SupportedLocale;
-                const { title, message } = buildNotificationMessage(data.chave, data.parametros, locale);
-
-                const messages: ExpoPushMessage[] = [
-                    {
-                        to: usuario.expoPushToken,
-                        sound: 'default',
-                        title,
-                        body: message,
-                        data: {
-                            notificacaoId: notificacao.id,
-                            dataEncomendaId: data.dataEncomendaId,
-                            pedidoDiretoId: data.pedidoDiretoId,
-                            pedidoEncomendaId: data.pedidoEncomendaId,
-                            tipo: data.tipo || 'user',
-                        },
-                        projectId: process.env.EXPO_PROJECT_ID,
-                    } as any,
-                ];
-
-                const chunks = this.expo.chunkPushNotifications(messages);
-                for (const chunk of chunks) {
-                    try {
-                        await this.expo.sendPushNotificationsAsync(chunk);
-                    } catch (error) {
-                        this.logger.error(`Erro ao enviar push chunk: ${error}`);
-                    }
-                }
-            } catch (error) {
-                this.logger.error(`Erro ao processar push: ${error}`);
-            }
+        const chunks = this.expo.chunkPushNotifications(messages);
+        for (const chunk of chunks) {
+          try {
+            await this.expo.sendPushNotificationsAsync(chunk);
+          } catch (error) {
+            this.logger.error(`Erro ao enviar push chunk: ${error}`);
+          }
         }
-
-        return notificacao;
+      } catch (error) {
+        this.logger.error(`Erro ao processar push: ${error}`);
+      }
     }
 
-    async getUserNotifications(usuarioId: string, skip = 0, take = 10) {
-        return this.prisma.notificacao.findMany({
-            where: { usuarioId },
-            orderBy: [{ criadoEm: 'desc' }, { id: 'desc' }],
-            skip,
-            take,
+    return notificacao;
+  }
+
+  async getUserNotifications(usuarioId: string, skip = 0, take = 10) {
+    return this.prisma.notificacao.findMany({
+      where: { usuarioId },
+      orderBy: [{ criadoEm: 'desc' }, { id: 'desc' }],
+      skip,
+      take,
+    });
+  }
+
+  async markAsRead(id: string, usuarioId: string) {
+    return this.prisma.notificacao.updateMany({
+      where: { id, usuarioId },
+      data: { lido: true },
+    });
+  }
+
+  async markAllAsRead(usuarioId: string) {
+    return this.prisma.notificacao.updateMany({
+      where: { usuarioId, lido: false },
+      data: { lido: true },
+    });
+  }
+
+  async deleteOne(id: string, usuarioId: string) {
+    return this.prisma.notificacao.deleteMany({
+      where: { id, usuarioId },
+    });
+  }
+
+  @Cron('0 3 * * *') // Daily at 03:00
+  async purgeOldNotifications() {
+    await this.cronLockService.withLock(
+      CRON_LOCK_KEYS.NOTIFICATION_PURGE,
+      'purgeOldNotifications',
+      async () => {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const result = await this.prisma.notificacao.deleteMany({
+          where: { criadoEm: { lt: thirtyDaysAgo } },
         });
-    }
 
-    async markAsRead(id: string, usuarioId: string) {
-        return this.prisma.notificacao.updateMany({
-            where: { id, usuarioId },
-            data: { lido: true },
-        });
-    }
-
-    async markAllAsRead(usuarioId: string) {
-        return this.prisma.notificacao.updateMany({
-            where: { usuarioId, lido: false },
-            data: { lido: true },
-        });
-    }
-
-    async deleteOne(id: string, usuarioId: string) {
-        return this.prisma.notificacao.deleteMany({
-            where: { id, usuarioId },
-        });
-    }
-
-    @Cron('0 3 * * *') // Daily at 03:00
-    async purgeOldNotifications() {
-        await this.cronLockService.withLock(
-            CRON_LOCK_KEYS.NOTIFICATION_PURGE,
-            'purgeOldNotifications',
-            async () => {
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-                const result = await this.prisma.notificacao.deleteMany({
-                    where: { criadoEm: { lt: thirtyDaysAgo } },
-                });
-
-                this.logger.log(`Auto-purge: ${result.count} notificações com 30+ dias removidas`);
-            },
+        this.logger.log(
+          `Auto-purge: ${result.count} notificações com 30+ dias removidas`,
         );
+      },
+    );
+  }
+
+  async broadcastNotification(data: {
+    usuarioIds: string[];
+    chave: string;
+    parametros: Record<string, string>;
+    dataEncomendaId?: number;
+    pedidoDiretoId?: number;
+    pedidoEncomendaId?: number;
+    tipo?: string;
+  }) {
+    const uniqueUserIds = [...new Set(data.usuarioIds)];
+    if (uniqueUserIds.length === 0) {
+      return { pushSent: 0 };
     }
 
-    async broadcastNotification(data: {
-        usuarioIds: string[];
-        chave: string;
-        parametros: Record<string, string>;
-        dataEncomendaId?: number;
-        pedidoDiretoId?: number;
-        pedidoEncomendaId?: number;
-        tipo?: string;
-    }) {
-        const uniqueUserIds = [...new Set(data.usuarioIds)];
-        if (uniqueUserIds.length === 0) {
-            return { pushSent: 0 };
-        }
+    const notificacaoIdByUserId = await this.createInboxNotificationsBulk(
+      data,
+      uniqueUserIds,
+    );
 
-        const notificacaoIdByUserId = await this.createInboxNotificationsBulk(data, uniqueUserIds);
+    const usuarios = await this.prisma.usuario.findMany({
+      where: {
+        id: { in: uniqueUserIds },
+        receberNotificacoes: true,
+        AND: [{ expoPushToken: { not: null } }, { expoPushToken: { not: '' } }],
+      },
+      select: { id: true, expoPushToken: true, idioma: true },
+    });
 
-        const usuarios = await this.prisma.usuario.findMany({
-            where: {
-                id: { in: uniqueUserIds },
-                receberNotificacoes: true,
-                AND: [{ expoPushToken: { not: null } }, { expoPushToken: { not: '' } }],
-            },
-            select: { id: true, expoPushToken: true, idioma: true },
-        });
+    const messages: ExpoPushMessage[] = [];
+    for (const usuario of usuarios) {
+      if (
+        usuario.expoPushToken &&
+        Expo.isExpoPushToken(usuario.expoPushToken)
+      ) {
+        const locale = (
+          usuario.idioma === 'ja-JP' ? 'ja-JP' : 'pt-BR'
+        ) as SupportedLocale;
+        const { title, message } = buildNotificationMessage(
+          data.chave,
+          data.parametros,
+          locale,
+        );
 
-        const messages: ExpoPushMessage[] = [];
-        for (const usuario of usuarios) {
-            if (usuario.expoPushToken && Expo.isExpoPushToken(usuario.expoPushToken)) {
-                const locale = (usuario.idioma === 'ja-JP' ? 'ja-JP' : 'pt-BR') as SupportedLocale;
-                const { title, message } = buildNotificationMessage(data.chave, data.parametros, locale);
-
-                messages.push({
-                    to: usuario.expoPushToken,
-                    sound: 'default',
-                    title,
-                    body: message,
-                    data: {
-                        notificacaoId: notificacaoIdByUserId.get(usuario.id),
-                        dataEncomendaId: data.dataEncomendaId,
-                        pedidoDiretoId: data.pedidoDiretoId,
-                        pedidoEncomendaId: data.pedidoEncomendaId,
-                        tipo: data.tipo || 'admin',
-                    },
-                    projectId: process.env.EXPO_PROJECT_ID,
-                } as any);
-            }
-        }
-
-        if (messages.length > 0) {
-            const chunks = this.expo.chunkPushNotifications(messages);
-            for (const chunk of chunks) {
-                try {
-                    const tickets = await this.expo.sendPushNotificationsAsync(chunk);
-                    for (const ticket of tickets) {
-                        if (ticket.status === 'error') {
-                            this.logger.warn(
-                                `Push broadcast ticket error: ${ticket.message}${ticket.details ? ` — ${JSON.stringify(ticket.details)}` : ''}`,
-                            );
-                        }
-                    }
-                } catch (error) {
-                    this.logger.error(`Erro ao enviar broadcast push chunk: ${error}`);
-                }
-            }
-        } else if (uniqueUserIds.length > 0) {
-            this.logger.log(
-                `Broadcast sem mensagens push (${uniqueUserIds.length} destinatários na inbox): nenhum token Expo válido com receberNotificacoes=true`,
-            );
-        }
-
-        return { pushSent: messages.length };
+        messages.push({
+          to: usuario.expoPushToken,
+          sound: 'default',
+          title,
+          body: message,
+          data: {
+            notificacaoId: notificacaoIdByUserId.get(usuario.id),
+            dataEncomendaId: data.dataEncomendaId,
+            pedidoDiretoId: data.pedidoDiretoId,
+            pedidoEncomendaId: data.pedidoEncomendaId,
+            tipo: data.tipo || 'admin',
+          },
+          projectId: process.env.EXPO_PROJECT_ID,
+        } as ExpoPushMessage & { projectId?: string });
+      }
     }
 
-    private async createInboxNotificationsBulk(
-        data: {
-            chave: string;
-            parametros: Record<string, string>;
-            dataEncomendaId?: number;
-            pedidoDiretoId?: number;
-            pedidoEncomendaId?: number;
-            tipo?: string;
-        },
-        usuarioIds: string[],
-    ): Promise<Map<string, string>> {
-        const notificacaoIdByUserId = new Map<string, string>();
-        const hasDedupeKey = !!(data.pedidoDiretoId || data.pedidoEncomendaId || data.dataEncomendaId);
-
-        if (hasDedupeKey) {
-            const dedupeWhere: Record<string, unknown> = {
-                usuarioId: { in: usuarioIds },
-                titulo: `${data.chave}.title`,
-            };
-            if (data.pedidoDiretoId) dedupeWhere.pedidoDiretoId = data.pedidoDiretoId;
-            if (data.pedidoEncomendaId) dedupeWhere.pedidoEncomendaId = data.pedidoEncomendaId;
-            if (data.dataEncomendaId) dedupeWhere.dataEncomendaId = data.dataEncomendaId;
-
-            await this.prisma.notificacao.deleteMany({ where: dedupeWhere });
-        }
-
-        const BATCH_SIZE = 100;
-        for (let offset = 0; offset < usuarioIds.length; offset += BATCH_SIZE) {
-            const batch = usuarioIds.slice(offset, offset + BATCH_SIZE);
-            const created = await this.prisma.notificacao.createManyAndReturn({
-                data: batch.map((usuarioId) => ({
-                    usuarioId,
-                    titulo: `${data.chave}.title`,
-                    mensagem: `${data.chave}.message`,
-                    parametros: data.parametros,
-                    dataEncomendaId: data.dataEncomendaId,
-                    pedidoDiretoId: data.pedidoDiretoId,
-                    pedidoEncomendaId: data.pedidoEncomendaId,
-                    tipo: data.tipo || 'admin',
-                })),
-            });
-
-            for (const notificacao of created) {
-                notificacaoIdByUserId.set(notificacao.usuarioId, notificacao.id);
+    if (messages.length > 0) {
+      const chunks = this.expo.chunkPushNotifications(messages);
+      for (const chunk of chunks) {
+        try {
+          const tickets = await this.expo.sendPushNotificationsAsync(chunk);
+          for (const ticket of tickets) {
+            if (ticket.status === 'error') {
+              this.logger.warn(
+                `Push broadcast ticket error: ${ticket.message}${ticket.details ? ` — ${JSON.stringify(ticket.details)}` : ''}`,
+              );
             }
+          }
+        } catch (error) {
+          this.logger.error(`Erro ao enviar broadcast push chunk: ${error}`);
         }
-
-        return notificacaoIdByUserId;
+      }
+    } else if (uniqueUserIds.length > 0) {
+      this.logger.log(
+        `Broadcast sem mensagens push (${uniqueUserIds.length} destinatários na inbox): nenhum token Expo válido com receberNotificacoes=true`,
+      );
     }
+
+    return { pushSent: messages.length };
+  }
+
+  private async createInboxNotificationsBulk(
+    data: {
+      chave: string;
+      parametros: Record<string, string>;
+      dataEncomendaId?: number;
+      pedidoDiretoId?: number;
+      pedidoEncomendaId?: number;
+      tipo?: string;
+    },
+    usuarioIds: string[],
+  ): Promise<Map<string, string>> {
+    const notificacaoIdByUserId = new Map<string, string>();
+    const hasDedupeKey = !!(
+      data.pedidoDiretoId ||
+      data.pedidoEncomendaId ||
+      data.dataEncomendaId
+    );
+
+    if (hasDedupeKey) {
+      const dedupeWhere: Record<string, unknown> = {
+        usuarioId: { in: usuarioIds },
+        titulo: `${data.chave}.title`,
+      };
+      if (data.pedidoDiretoId) dedupeWhere.pedidoDiretoId = data.pedidoDiretoId;
+      if (data.pedidoEncomendaId)
+        dedupeWhere.pedidoEncomendaId = data.pedidoEncomendaId;
+      if (data.dataEncomendaId)
+        dedupeWhere.dataEncomendaId = data.dataEncomendaId;
+
+      await this.prisma.notificacao.deleteMany({ where: dedupeWhere });
+    }
+
+    const BATCH_SIZE = 100;
+    for (let offset = 0; offset < usuarioIds.length; offset += BATCH_SIZE) {
+      const batch = usuarioIds.slice(offset, offset + BATCH_SIZE);
+      const created = await this.prisma.notificacao.createManyAndReturn({
+        data: batch.map((usuarioId) => ({
+          usuarioId,
+          titulo: `${data.chave}.title`,
+          mensagem: `${data.chave}.message`,
+          parametros: data.parametros,
+          dataEncomendaId: data.dataEncomendaId,
+          pedidoDiretoId: data.pedidoDiretoId,
+          pedidoEncomendaId: data.pedidoEncomendaId,
+          tipo: data.tipo || 'admin',
+        })),
+      });
+
+      for (const notificacao of created) {
+        notificacaoIdByUserId.set(notificacao.usuarioId, notificacao.id);
+      }
+    }
+
+    return notificacaoIdByUserId;
+  }
 }

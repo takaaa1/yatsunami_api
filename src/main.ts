@@ -6,7 +6,10 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import * as path from 'path';
 import { AppModule } from './app.module';
-import { resolveRuntimeMode, isCronEnabled } from './common/runtime/runtime.config';
+import {
+  resolveRuntimeMode,
+  isCronEnabled,
+} from './common/runtime/runtime.config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -22,7 +25,8 @@ async function bootstrap() {
   app.useWebSocketAdapter(new IoAdapter(app));
 
   // Ficheiros estáticos: /uploads e também /api/uploads (reverse proxy que só encaminha /api)
-  const uploadsPath = process.env.UPLOADS_PATH || path.join(process.cwd(), 'uploads');
+  const uploadsPath =
+    process.env.UPLOADS_PATH || path.join(process.cwd(), 'uploads');
   app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
   app.useStaticAssets(uploadsPath, { prefix: '/api/uploads' });
 
@@ -54,7 +58,9 @@ async function bootstrap() {
   // Swagger setup
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Yatsunami API')
-    .setDescription('API do sistema Yatsunami — gerenciamento de restaurante japonês')
+    .setDescription(
+      'API do sistema Yatsunami — gerenciamento de restaurante japonês',
+    )
     .setVersion('1.0')
     .addBearerAuth(
       {
@@ -73,7 +79,9 @@ async function bootstrap() {
 
   await app.listen(port);
 
-  logger.log(`Runtime: ${runtimeMode} | crons=${isCronEnabled() ? 'on' : 'off'}`);
+  logger.log(
+    `Runtime: ${runtimeMode} | crons=${isCronEnabled() ? 'on' : 'off'}`,
+  );
   logger.log(`🚀 Yatsunami API running on http://localhost:${port}`);
   logger.log(`📚 API endpoints available at http://localhost:${port}/api`);
   logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);

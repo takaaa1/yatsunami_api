@@ -5,177 +5,201 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class SalesService {
-    constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
-    async create(creatorId: string | null, createSaleDto: CreateSaleDto) {
-        const { usuarioId, observacoes, descontoGeralTipo, descontoGeralValor, itens, taxaEntrega, data } = createSaleDto;
+  async create(creatorId: string | null, createSaleDto: CreateSaleDto) {
+    const {
+      usuarioId,
+      observacoes,
+      descontoGeralTipo,
+      descontoGeralValor,
+      itens,
+      taxaEntrega,
+      data,
+    } = createSaleDto;
 
-        return this.prisma.$transaction(async (tx) => {
-            let totalVenda = new Prisma.Decimal(0);
+    return this.prisma.$transaction(async (tx) => {
+      let totalVenda = new Prisma.Decimal(0);
 
-            // Create the Sale record first to get an ID
-            const venda = await tx.venda.create({
-                data: {
-                    usuarioId: usuarioId || null,
-                    observacoes,
-                    descontoGeralTipo: descontoGeralTipo || null,
-                    descontoGeralValor: descontoGeralValor || 0,
-                    taxaEntrega: taxaEntrega || 0,
-                    criadoPor: creatorId,
-                    total: 0, // Will update later
-                    ...(data && { data }),
-                },
-            });
+      // Create the Sale record first to get an ID
+      const venda = await tx.venda.create({
+        data: {
+          usuarioId: usuarioId || null,
+          observacoes,
+          descontoGeralTipo: descontoGeralTipo || null,
+          descontoGeralValor: descontoGeralValor || 0,
+          taxaEntrega: taxaEntrega || 0,
+          criadoPor: creatorId,
+          total: 0, // Will update later
+          ...(data && { data }),
+        },
+      });
 
-            for (const item of itens) {
-                const produto = await tx.produto.findUnique({
-                    where: { id: item.produtoId },
-                    include: { variedades: true },
-                });
-
-                if (!produto) {
-                    throw new NotFoundException(`Produto com ID ${item.produtoId} não encontrado`);
-                }
-
-                const precoUnitario = new Prisma.Decimal(item.precoUnitario);
-                const variedadeId = item.variedadeId || null;
-
-                if (variedadeId) {
-                    const variedade = produto.variedades.find(v => v.id === variedadeId);
-                    if (!variedade) {
-                        throw new NotFoundException(`Variedade com ID ${variedadeId} não encontrada para o produto ${item.produtoId}`);
-                    }
-                }
-
-                const quantidade = new Prisma.Decimal(item.quantidade);
-                const valorDesconto = new Prisma.Decimal(item.valorDesconto || 0);
-                let subtotal = precoUnitario.mul(quantidade);
-
-                // Apply per-unit discount * quantity
-                if (item.tipoDesconto === DiscountType.PERCENTAGE) {
-                    const discountPerUnit = precoUnitario.mul(valorDesconto).div(100);
-                    subtotal = subtotal.sub(discountPerUnit.mul(quantidade));
-                } else if (item.tipoDesconto === DiscountType.FIXED) {
-                    subtotal = subtotal.sub(valorDesconto.mul(quantidade));
-                }
-
-                if (subtotal.lt(0)) subtotal = new Prisma.Decimal(0);
-
-                await tx.itemVenda.create({
-                    data: {
-                        vendaId: venda.id,
-                        produtoId: item.produtoId,
-                        variedadeId,
-                        quantidade: item.quantidade,
-                        precoUnitario: item.precoUnitario,
-                        tipoDesconto: item.tipoDesconto || null,
-                        valorDesconto: item.valorDesconto || 0,
-                    },
-                });
-
-                totalVenda = totalVenda.add(subtotal);
-            }
-
-            // Apply global discount
-            if (descontoGeralTipo && descontoGeralValor && descontoGeralValor > 0) {
-                if (descontoGeralTipo === DiscountType.PERCENTAGE) {
-                    const globalDiscountValue = totalVenda.mul(new Prisma.Decimal(descontoGeralValor)).div(100);
-                    totalVenda = totalVenda.sub(globalDiscountValue);
-                } else if (descontoGeralTipo === DiscountType.FIXED) {
-                    totalVenda = totalVenda.sub(new Prisma.Decimal(descontoGeralValor));
-                }
-            }
-
-            if (totalVenda.lt(0)) totalVenda = new Prisma.Decimal(0);
-
-            // Add delivery fee
-            if (taxaEntrega && taxaEntrega > 0) {
-                totalVenda = totalVenda.add(new Prisma.Decimal(taxaEntrega));
-            }
-
-            // Update the sale with final total
-            return tx.venda.update({
-                where: { id: venda.id },
-                data: { total: totalVenda },
-                include: {
-                    itens: {
-                        include: {
-                            produto: true,
-                            variedade: true,
-                        },
-                    },
-                    usuario: true,
-                },
-            });
+      for (const item of itens) {
+        const produto = await tx.produto.findUnique({
+          where: { id: item.produtoId },
+          include: { variedades: true },
         });
-    }
 
-    async findAll(query: { limit?: number; offset?: number; search?: string; dateFrom?: string; dateTo?: string }) {
-        const { limit = 20, offset = 0, search, dateFrom, dateTo } = query;
-
-        const where: Prisma.VendaWhereInput = {};
-        if (search) {
-            where.OR = [
-                { observacoes: { contains: search, mode: 'insensitive' } },
-                { usuario: { nome: { contains: search, mode: 'insensitive' } } },
-            ];
-        }
-        if (dateFrom || dateTo) {
-            where.data = {
-                ...(dateFrom && { gte: new Date(dateFrom) }),
-                ...(dateTo && { lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)) }),
-            };
+        if (!produto) {
+          throw new NotFoundException(
+            `Produto com ID ${item.produtoId} não encontrado`,
+          );
         }
 
-        const [items, total] = await Promise.all([
-            this.prisma.venda.findMany({
-                where,
-                include: {
-                    itens: {
-                        include: {
-                            produto: true,
-                        },
-                    },
-                    usuario: true,
-                },
-                orderBy: [{ data: 'desc' }, { id: 'desc' }],
-                take: limit,
-                skip: offset,
-            }),
-            this.prisma.venda.count({ where }),
-        ]);
+        const precoUnitario = new Prisma.Decimal(item.precoUnitario);
+        const variedadeId = item.variedadeId || null;
 
-        return { items, total };
-    }
+        if (variedadeId) {
+          const variedade = produto.variedades.find(
+            (v) => v.id === variedadeId,
+          );
+          if (!variedade) {
+            throw new NotFoundException(
+              `Variedade com ID ${variedadeId} não encontrada para o produto ${item.produtoId}`,
+            );
+          }
+        }
 
-    async findOne(id: number) {
-        const venda = await this.prisma.venda.findUnique({
-            where: { id },
+        const quantidade = new Prisma.Decimal(item.quantidade);
+        const valorDesconto = new Prisma.Decimal(item.valorDesconto || 0);
+        let subtotal = precoUnitario.mul(quantidade);
+
+        // Apply per-unit discount * quantity
+        if (item.tipoDesconto === DiscountType.PERCENTAGE) {
+          const discountPerUnit = precoUnitario.mul(valorDesconto).div(100);
+          subtotal = subtotal.sub(discountPerUnit.mul(quantidade));
+        } else if (item.tipoDesconto === DiscountType.FIXED) {
+          subtotal = subtotal.sub(valorDesconto.mul(quantidade));
+        }
+
+        if (subtotal.lt(0)) subtotal = new Prisma.Decimal(0);
+
+        await tx.itemVenda.create({
+          data: {
+            vendaId: venda.id,
+            produtoId: item.produtoId,
+            variedadeId,
+            quantidade: item.quantidade,
+            precoUnitario: item.precoUnitario,
+            tipoDesconto: item.tipoDesconto || null,
+            valorDesconto: item.valorDesconto || 0,
+          },
+        });
+
+        totalVenda = totalVenda.add(subtotal);
+      }
+
+      // Apply global discount
+      if (descontoGeralTipo && descontoGeralValor && descontoGeralValor > 0) {
+        if (descontoGeralTipo === DiscountType.PERCENTAGE) {
+          const globalDiscountValue = totalVenda
+            .mul(new Prisma.Decimal(descontoGeralValor))
+            .div(100);
+          totalVenda = totalVenda.sub(globalDiscountValue);
+        } else if (descontoGeralTipo === DiscountType.FIXED) {
+          totalVenda = totalVenda.sub(new Prisma.Decimal(descontoGeralValor));
+        }
+      }
+
+      if (totalVenda.lt(0)) totalVenda = new Prisma.Decimal(0);
+
+      // Add delivery fee
+      if (taxaEntrega && taxaEntrega > 0) {
+        totalVenda = totalVenda.add(new Prisma.Decimal(taxaEntrega));
+      }
+
+      // Update the sale with final total
+      return tx.venda.update({
+        where: { id: venda.id },
+        data: { total: totalVenda },
+        include: {
+          itens: {
             include: {
-                itens: {
-                    include: {
-                        produto: true,
-                        variedade: true,
-                    },
-                },
-                usuario: true,
-                criador: true,
+              produto: true,
+              variedade: true,
             },
-        });
+          },
+          usuario: true,
+        },
+      });
+    });
+  }
 
-        if (!venda) {
-            throw new NotFoundException(`Venda com ID ${id} não encontrada`);
-        }
+  async findAll(query: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    const { limit = 20, offset = 0, search, dateFrom, dateTo } = query;
 
-        return venda;
+    const where: Prisma.VendaWhereInput = {};
+    if (search) {
+      where.OR = [
+        { observacoes: { contains: search, mode: 'insensitive' } },
+        { usuario: { nome: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+    if (dateFrom || dateTo) {
+      where.data = {
+        ...(dateFrom && { gte: new Date(dateFrom) }),
+        ...(dateTo && {
+          lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)),
+        }),
+      };
     }
 
-    async delete(id: number) {
-        const venda = await this.prisma.venda.findUnique({ where: { id } });
-        if (!venda) {
-            throw new NotFoundException(`Venda com ID ${id} não encontrada`);
-        }
+    const [items, total] = await Promise.all([
+      this.prisma.venda.findMany({
+        where,
+        include: {
+          itens: {
+            include: {
+              produto: true,
+            },
+          },
+          usuario: true,
+        },
+        orderBy: [{ data: 'desc' }, { id: 'desc' }],
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.venda.count({ where }),
+    ]);
 
-        return this.prisma.venda.delete({ where: { id } });
+    return { items, total };
+  }
+
+  async findOne(id: number) {
+    const venda = await this.prisma.venda.findUnique({
+      where: { id },
+      include: {
+        itens: {
+          include: {
+            produto: true,
+            variedade: true,
+          },
+        },
+        usuario: true,
+        criador: true,
+      },
+    });
+
+    if (!venda) {
+      throw new NotFoundException(`Venda com ID ${id} não encontrada`);
     }
+
+    return venda;
+  }
+
+  async delete(id: number) {
+    const venda = await this.prisma.venda.findUnique({ where: { id } });
+    if (!venda) {
+      throw new NotFoundException(`Venda com ID ${id} não encontrada`);
+    }
+
+    return this.prisma.venda.delete({ where: { id } });
+  }
 }
