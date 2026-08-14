@@ -1,17 +1,24 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateExpressOrderDto } from './dto/create-express-order.dto';
 import { generateOrderCode } from '../../common/utils/string-utils';
 import { readLocalizedText } from '../../common/utils/localized-text';
 import { Prisma, VariedadePedidoDireto } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class ExpressOrdersService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
-  ) { }
+    private readonly realtimeGateway: RealtimeGateway,
+  ) {}
 
   async checkStatus(userId: string) {
     const client = await this.prisma.clientePedidoDireto.findUnique({
@@ -64,9 +71,15 @@ export class ExpressOrdersService {
         : Promise.resolve<VariedadePedidoDireto[]>([]),
     ]);
 
-    const productMap = new Map(products.map((product) => [product.id, product]));
-    const enabledProductIds = new Set(enabledProducts.map((entry) => entry.produtoId));
-    const enabledVarietyIds = new Set(enabledVarieties.map((entry) => entry.variedadeId));
+    const productMap = new Map(
+      products.map((product) => [product.id, product]),
+    );
+    const enabledProductIds = new Set(
+      enabledProducts.map((entry) => entry.produtoId),
+    );
+    const enabledVarietyIds = new Set(
+      enabledVarieties.map((entry) => entry.variedadeId),
+    );
 
     for (const item of dto.itens) {
       const product = productMap.get(item.produtoId);
@@ -76,7 +89,7 @@ export class ExpressOrdersService {
       }
 
       let price = Number(product.preco);
-      let variety: typeof product.variedades[0] | null | undefined = null;
+      let variety: (typeof product.variedades)[0] | null | undefined = null;
 
       if (item.variedadeId) {
         variety = product.variedades.find((v) => v.id === item.variedadeId);
@@ -86,12 +99,16 @@ export class ExpressOrdersService {
 
         if (!enabledVarietyIds.has(item.variedadeId)) {
           const vName = readLocalizedText(variety.nome, 'Variety');
-          throw new BadRequestException(`Variety ${vName} is not available for express orders`);
+          throw new BadRequestException(
+            `Variety ${vName} is not available for express orders`,
+          );
         }
         price = Number(variety.preco);
       } else if (!enabledProductIds.has(item.produtoId)) {
         const name = readLocalizedText(product.nome, 'Product');
-        throw new BadRequestException(`Product ${name} is not available for express orders`);
+        throw new BadRequestException(
+          `Product ${name} is not available for express orders`,
+        );
       }
 
       const subtotal = price * item.quantidade;
@@ -144,16 +161,21 @@ export class ExpressOrdersService {
     try {
       const admins = await this.prisma.usuario.findMany({
         where: { role: 'admin' },
-        select: { id: true }
+        select: { id: true },
       });
 
-      const targetAdmins = admins.map(a => a.id).filter(adminId => adminId !== userId);
+      const targetAdmins = admins
+        .map((a) => a.id)
+        .filter((adminId) => adminId !== userId);
 
       if (targetAdmins.length > 0) {
         await this.notificationsService.broadcastNotification({
           usuarioIds: targetAdmins,
           chave: 'notification.expressOrderCreated',
-          parametros: { userName: order.usuario.nome, orderCode: order.codigo ?? '' },
+          parametros: {
+            userName: order.usuario.nome,
+            orderCode: order.codigo ?? '',
+          },
           pedidoDiretoId: order.id,
           tipo: 'admin',
         });
@@ -161,6 +183,11 @@ export class ExpressOrdersService {
     } catch (error) {
       console.error('Erro ao notificar admins sobre pedido expresso:', error);
     }
+
+    this.realtimeGateway.broadcast('pedidos_diretos', 'INSERT', {
+      id: order.id,
+      status: order.status,
+    });
 
     return order;
   }
@@ -203,7 +230,11 @@ export class ExpressOrdersService {
 
   /** `Produto.categoria` é coluna JSON; sem `ordem` numérica, vai para o fim. */
   private readCategoriaOrdem(categoria: unknown): number {
-    if (categoria && typeof categoria === 'object' && !Array.isArray(categoria)) {
+    if (
+      categoria &&
+      typeof categoria === 'object' &&
+      !Array.isArray(categoria)
+    ) {
       const ordem = (categoria as { ordem?: unknown }).ordem;
       if (typeof ordem === 'number') return ordem;
     }
@@ -214,7 +245,15 @@ export class ExpressOrdersService {
     const order = await this.prisma.pedidoDireto.findUnique({
       where: { id },
       include: {
-        usuario: { select: { id: true, nome: true, email: true, telefone: true, endereco: true } },
+        usuario: {
+          select: {
+            id: true,
+            nome: true,
+            email: true,
+            telefone: true,
+            endereco: true,
+          },
+        },
         itens: {
           include: {
             produto: { select: { nome: true } },
@@ -235,7 +274,12 @@ export class ExpressOrdersService {
     return order;
   }
 
-  async updateStatus(id: number, status: string, adminUserId: string, observacoes?: string) {
+  async updateStatus(
+    id: number,
+    status: string,
+    adminUserId: string,
+    observacoes?: string,
+  ) {
     if (status === 'entregue') {
       let wasAlreadyDelivered = false;
 
@@ -270,7 +314,9 @@ export class ExpressOrdersService {
         if (!order.vendaId) {
           let total = new Prisma.Decimal(0);
           for (const item of order.itens) {
-            total = total.add(new Prisma.Decimal(item.precoUnitario).mul(item.quantidade));
+            total = total.add(
+              new Prisma.Decimal(item.precoUnitario).mul(item.quantidade),
+            );
           }
 
           const venda = await tx.venda.create({
@@ -280,7 +326,7 @@ export class ExpressOrdersService {
               total,
               criadoPor: adminUserId,
               itens: {
-                create: order.itens.map(item => ({
+                create: order.itens.map((item) => ({
                   produtoId: item.produtoId,
                   variedadeId: item.variedadeId ?? null,
                   quantidade: item.quantidade,
@@ -317,9 +363,17 @@ export class ExpressOrdersService {
             tipo: 'user',
           });
         } catch (error) {
-          console.error('Erro ao notificar usuário sobre status do pedido express:', error);
+          console.error(
+            'Erro ao notificar usuário sobre status do pedido express:',
+            error,
+          );
         }
       }
+
+      this.realtimeGateway.broadcast('pedidos_diretos', 'UPDATE', {
+        id: updatedOrder.id,
+        status: updatedOrder.status,
+      });
 
       return updatedOrder;
     }
@@ -345,8 +399,8 @@ export class ExpressOrdersService {
       where: { id },
       data,
       include: {
-        usuario: { select: { id: true, nome: true } }
-      }
+        usuario: { select: { id: true, nome: true } },
+      },
     });
 
     // Notificar o usuário sobre a mudança de status
@@ -361,8 +415,16 @@ export class ExpressOrdersService {
         tipo: 'user',
       });
     } catch (error) {
-      console.error('Erro ao notificar usuário sobre status do pedido express:', error);
+      console.error(
+        'Erro ao notificar usuário sobre status do pedido express:',
+        error,
+      );
     }
+
+    this.realtimeGateway.broadcast('pedidos_diretos', 'UPDATE', {
+      id: updatedOrder.id,
+      status: updatedOrder.status,
+    });
 
     return updatedOrder;
   }
@@ -391,8 +453,13 @@ export class ExpressOrdersService {
 
     // Notificar admins sobre o cancelamento pelo usuário
     try {
-      const admins = await this.prisma.usuario.findMany({ where: { role: 'admin' }, select: { id: true } });
-      const targetAdmins = admins.map(a => a.id).filter(adminId => adminId !== userId);
+      const admins = await this.prisma.usuario.findMany({
+        where: { role: 'admin' },
+        select: { id: true },
+      });
+      const targetAdmins = admins
+        .map((a) => a.id)
+        .filter((adminId) => adminId !== userId);
       if (targetAdmins.length > 0) {
         await this.notificationsService.broadcastNotification({
           usuarioIds: targetAdmins,
@@ -403,8 +470,16 @@ export class ExpressOrdersService {
         });
       }
     } catch (error) {
-      console.error('Erro ao notificar admins sobre cancelamento de pedido expresso:', error);
+      console.error(
+        'Erro ao notificar admins sobre cancelamento de pedido expresso:',
+        error,
+      );
     }
+
+    this.realtimeGateway.broadcast('pedidos_diretos', 'UPDATE', {
+      id: cancelledOrder.id,
+      status: cancelledOrder.status,
+    });
 
     return cancelledOrder;
   }
@@ -425,7 +500,7 @@ export class ExpressOrdersService {
   }
 
   async toggleClient(userId: string, habilitado: boolean) {
-    return this.prisma.clientePedidoDireto.upsert({
+    const relation = await this.prisma.clientePedidoDireto.upsert({
       where: { usuarioId: userId },
       update: { habilitado },
       create: {
@@ -433,6 +508,13 @@ export class ExpressOrdersService {
         habilitado,
       },
     });
+
+    this.realtimeGateway.broadcast('clientes_pedido_direto', 'UPDATE', {
+      usuarioId: userId,
+      habilitado,
+    });
+
+    return relation;
   }
 
   async findAllProducts() {
@@ -445,10 +527,10 @@ export class ExpressOrdersService {
         variedades: {
           include: {
             variedadesPedidoDireto: {
-              select: { habilitado: true }
-            }
+              select: { habilitado: true },
+            },
           },
-          orderBy: { id: 'asc' }
+          orderBy: { id: 'asc' },
         },
       },
     });
@@ -470,41 +552,51 @@ export class ExpressOrdersService {
   async toggleProduct(produtoId: number, habilitado: boolean) {
     // Check if relation exists first
     const existing = await this.prisma.produtoPedidoDireto.findFirst({
-      where: { produtoId }
+      where: { produtoId },
     });
 
-    if (existing) {
-      return this.prisma.produtoPedidoDireto.update({
-        where: { id: existing.id },
-        data: { habilitado }
-      });
-    } else {
-      return this.prisma.produtoPedidoDireto.create({
-        data: {
-          produtoId,
-          habilitado
-        }
-      });
-    }
+    const relation = existing
+      ? await this.prisma.produtoPedidoDireto.update({
+          where: { id: existing.id },
+          data: { habilitado },
+        })
+      : await this.prisma.produtoPedidoDireto.create({
+          data: {
+            produtoId,
+            habilitado,
+          },
+        });
+
+    this.realtimeGateway.broadcast('produtos_pedido_direto', 'UPDATE', {
+      produtoId,
+      habilitado,
+    });
+
+    return relation;
   }
   async toggleVariety(variedadeId: number, habilitado: boolean) {
     // Check if relation exists first
     const existing = await this.prisma.variedadePedidoDireto.findUnique({
-      where: { variedadeId }
+      where: { variedadeId },
     });
 
-    if (existing) {
-      return this.prisma.variedadePedidoDireto.update({
-        where: { id: existing.id },
-        data: { habilitado }
-      });
-    } else {
-      return this.prisma.variedadePedidoDireto.create({
-        data: {
-          variedadeId,
-          habilitado
-        }
-      });
-    }
+    const relation = existing
+      ? await this.prisma.variedadePedidoDireto.update({
+          where: { id: existing.id },
+          data: { habilitado },
+        })
+      : await this.prisma.variedadePedidoDireto.create({
+          data: {
+            variedadeId,
+            habilitado,
+          },
+        });
+
+    this.realtimeGateway.broadcast('variedades_pedido_direto', 'UPDATE', {
+      variedadeId,
+      habilitado,
+    });
+
+    return relation;
   }
 }

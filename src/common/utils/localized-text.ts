@@ -16,19 +16,19 @@ const LANGUAGE_PRIORITY = ['pt-BR', 'ja-JP'] as const;
  * Devolve `fallback` quando não há texto utilizável.
  */
 export function readLocalizedText(value: unknown, fallback = ''): string {
-    if (typeof value === 'string') return value || fallback;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return fallback;
-    }
+  if (typeof value === 'string') return value || fallback;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return fallback;
+  }
 
-    const map = value as Record<string, unknown>;
-    for (const lang of LANGUAGE_PRIORITY) {
-        const text = map[lang];
-        if (typeof text === 'string' && text) return text;
-    }
+  const map = value as Record<string, unknown>;
+  for (const lang of LANGUAGE_PRIORITY) {
+    const text = map[lang];
+    if (typeof text === 'string' && text) return text;
+  }
 
-    const first = Object.values(map).find(
-        (entry): entry is string => typeof entry === 'string' && entry.length > 0,
-    );
-    return first ?? fallback;
+  const first = Object.values(map).find(
+    (entry): entry is string => typeof entry === 'string' && entry.length > 0,
+  );
+  return first ?? fallback;
 }

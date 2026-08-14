@@ -30,7 +30,9 @@ export class OrdersService {
     private cronLockService: CronLockService,
   ) {}
 
-  private formatAddress(address: Prisma.InputJsonValue | undefined): string | null {
+  private formatAddress(
+    address: Prisma.InputJsonValue | undefined,
+  ): string | null {
     if (!address) return null;
     if (typeof address === 'string') return address.trim();
 
@@ -1522,7 +1524,12 @@ export class OrdersService {
     // Group products
     const productSummary: Record<
       string,
-      { nome: unknown; variedadeNome: unknown; quantidade: number; total: number }
+      {
+        nome: unknown;
+        variedadeNome: unknown;
+        quantidade: number;
+        total: number;
+      }
     > = {};
 
     orders

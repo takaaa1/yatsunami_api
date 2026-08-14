@@ -4,81 +4,102 @@ import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
-    private readonly logger = new Logger(MailService.name);
-    private transporter: nodemailer.Transporter;
-    private readonly fromEmail: string;
-    private readonly fromName: string;
+  private readonly logger = new Logger(MailService.name);
+  private transporter: nodemailer.Transporter;
+  private readonly fromEmail: string;
+  private readonly fromName: string;
 
-    constructor(private configService: ConfigService) {
-        this.fromEmail = this.configService.get<string>('mail.fromEmail') || 'no-reply@yatsunami.com.br';
-        this.fromName = this.configService.get<string>('mail.fromName') || 'Yatsunami';
+  constructor(private configService: ConfigService) {
+    this.fromEmail =
+      this.configService.get<string>('mail.fromEmail') ||
+      'no-reply@yatsunami.com.br';
+    this.fromName =
+      this.configService.get<string>('mail.fromName') || 'Yatsunami';
 
-        this.transporter = nodemailer.createTransport({
-            host: this.configService.get<string>('mail.host'),
-            port: this.configService.get<number>('mail.port'),
-            secure: false, // true for 465, false for other ports
-            auth: {
-                user: this.configService.get<string>('mail.user'),
-                pass: this.configService.get<string>('mail.password'),
-            },
-        });
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get<string>('mail.host'),
+      port: this.configService.get<number>('mail.port'),
+      secure: false, // true for 465, false for other ports
+      auth: {
+        user: this.configService.get<string>('mail.user'),
+        pass: this.configService.get<string>('mail.password'),
+      },
+    });
+  }
+
+  async sendResetCode(
+    email: string,
+    code: string,
+    name: string,
+    language: string = 'pt-BR',
+  ): Promise<boolean> {
+    const expiration =
+      this.configService.get<number>('auth.resetPasswordExpirationMinutes') ??
+      15;
+
+    // Debug log (temporary)
+    const mailHost = this.configService.get<string>('mail.host');
+    this.logger.log(
+      `[Attempt] Sending to ${email} (${language}) via ${mailHost}`,
+    );
+
+    const subject =
+      language === 'ja-JP'
+        ? 'Yatsunami - パスワードの再設定'
+        : 'Yatsunami - Recuperação de Senha';
+
+    const html = this.getResetPasswordTemplate(
+      code,
+      name,
+      language,
+      expiration,
+    );
+
+    try {
+      // `SentMessageInfo` é `any` no próprio @types/nodemailer; estreitamos
+      // para o único campo que lemos.
+      const info = (await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: subject,
+        html: html,
+      })) as { messageId?: string };
+
+      this.logger.log(`Email sent: ${info.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Failed to send email: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
     }
+  }
 
-    async sendResetCode(email: string, code: string, name: string, language: string = 'pt-BR'): Promise<boolean> {
-        const expiration =
-            this.configService.get<number>('auth.resetPasswordExpirationMinutes') ??
-            15;
+  private getResetPasswordTemplate(
+    code: string,
+    name: string,
+    language: string,
+    expiration: number,
+  ): string {
+    const isJp = language === 'ja-JP';
 
-        // Debug log (temporary)
-        const mailHost = this.configService.get<string>('mail.host');
-        this.logger.log(`[Attempt] Sending to ${email} (${language}) via ${mailHost}`);
+    const texts = {
+      title: isJp ? 'パスワードの再設定' : 'Recuperação de Senha',
+      greeting: isJp ? `${name} 様、` : `Olá, ${name}`,
+      intro: isJp
+        ? 'Yatsunamiアカウントのパスワード再設定がリクエストされました。'
+        : 'Você solicitou a recuperação de senha para sua conta no Yatsunami.',
+      codeLabel: isJp ? '確認コード：' : 'Seu código de verificação é:',
+      expiry: isJp
+        ? `このコードは${expiration}分間有効です。`
+        : `Este código expira em ${expiration} minutos.`,
+      ignore: isJp
+        ? 'お心当たりがない場合は、このメールを無視してください。'
+        : 'Se você não solicitou isso, por favor ignore este e-mail.',
+      regards: isJp ? 'Yatsunamiチーム' : 'Atenciosamente,<br>Equipe Yatsunami',
+    };
 
-        const subject = language === 'ja-JP'
-            ? 'Yatsunami - パスワードの再設定'
-            : 'Yatsunami - Recuperação de Senha';
-
-        const html = this.getResetPasswordTemplate(code, name, language, expiration);
-
-        try {
-            // `SentMessageInfo` é `any` no próprio @types/nodemailer; estreitamos
-            // para o único campo que lemos.
-            const info = (await this.transporter.sendMail({
-                from: `"${this.fromName}" <${this.fromEmail}>`,
-                to: email,
-                subject: subject,
-                html: html,
-            })) as { messageId?: string };
-
-            this.logger.log(`Email sent: ${info.messageId}`);
-            return true;
-        } catch (error) {
-            this.logger.error(
-                `Failed to send email: ${error instanceof Error ? error.message : String(error)}`,
-            );
-            return false;
-        }
-    }
-
-    private getResetPasswordTemplate(code: string, name: string, language: string, expiration: number): string {
-        const isJp = language === 'ja-JP';
-
-        const texts = {
-            title: isJp ? 'パスワードの再設定' : 'Recuperação de Senha',
-            greeting: isJp ? `${name} 様、` : `Olá, ${name}`,
-            intro: isJp
-                ? 'Yatsunamiアカウントのパスワード再設定がリクエストされました。'
-                : 'Você solicitou a recuperação de senha para sua conta no Yatsunami.',
-            codeLabel: isJp ? '確認コード：' : 'Seu código de verificação é:',
-            expiry: isJp
-                ? `このコードは${expiration}分間有効です。`
-                : `Este código expira em ${expiration} minutos.`,
-            ignore: isJp
-                ? 'お心当たりがない場合は、このメールを無視してください。'
-                : 'Se você não solicitou isso, por favor ignore este e-mail.',
-            regards: isJp ? 'Yatsunamiチーム' : 'Atenciosamente,<br>Equipe Yatsunami',
-        };
-
-        return `
+    return `
             <!DOCTYPE html>
             <html>
             <head>
@@ -134,5 +155,5 @@ export class MailService {
             </body>
             </html>
         `;
-    }
+  }
 }

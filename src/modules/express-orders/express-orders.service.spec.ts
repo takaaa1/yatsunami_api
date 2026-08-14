@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ExpressOrdersService } from './express-orders.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 describe('ExpressOrdersService (perf Fase 2)', () => {
   let service: ExpressOrdersService;
   let notificationsService: { createAndSendNotification: jest.Mock };
+  let realtimeGateway: { broadcast: jest.Mock };
 
   const deliveredOrder = {
     id: 1,
@@ -27,20 +29,26 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
   };
 
   const mockPrisma = {
-    $transaction: jest.fn(async (fn: (tx: typeof mockTx) => Promise<unknown>) => fn(mockTx)),
+    $transaction: jest.fn(async (fn: (tx: typeof mockTx) => Promise<unknown>) =>
+      fn(mockTx),
+    ),
     pedidoDireto: {
       update: jest.fn(),
     },
   };
 
   beforeEach(async () => {
-    notificationsService = { createAndSendNotification: jest.fn().mockResolvedValue(undefined) };
+    notificationsService = {
+      createAndSendNotification: jest.fn().mockResolvedValue(undefined),
+    };
+    realtimeGateway = { broadcast: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExpressOrdersService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: notificationsService },
+        { provide: RealtimeGateway, useValue: realtimeGateway },
       ],
     }).compile();
 
@@ -52,13 +60,18 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
     it('retry idempotente — não cria venda nem notifica de novo', async () => {
       mockTx.pedidoDireto.findUnique
         .mockResolvedValueOnce({ ...deliveredOrder, itens: [] })
-        .mockResolvedValueOnce({ ...deliveredOrder, usuario: { id: 'user-1', nome: 'Test' } });
+        .mockResolvedValueOnce({
+          ...deliveredOrder,
+          usuario: { id: 'user-1', nome: 'Test' },
+        });
 
       const result = await service.updateStatus(1, 'entregue', 'admin-1');
 
       expect(mockTx.venda.create).not.toHaveBeenCalled();
       expect(mockTx.pedidoDireto.update).not.toHaveBeenCalled();
-      expect(notificationsService.createAndSendNotification).not.toHaveBeenCalled();
+      expect(
+        notificationsService.createAndSendNotification,
+      ).not.toHaveBeenCalled();
       expect(result?.vendaId).toBe(99);
     });
 
@@ -87,7 +100,9 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
 
       expect(mockTx.venda.create).toHaveBeenCalledTimes(1);
       expect(mockTx.pedidoDireto.update).toHaveBeenCalledTimes(1);
-      expect(notificationsService.createAndSendNotification).toHaveBeenCalledTimes(1);
+      expect(
+        notificationsService.createAndSendNotification,
+      ).toHaveBeenCalledTimes(1);
       expect(result.vendaId).toBe(200);
     });
   });
@@ -103,7 +118,9 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
         { produtoId: 2, habilitado: true },
       ]);
       const findManyVariedade = jest.fn().mockResolvedValue([]);
-      const findUniqueCliente = jest.fn().mockResolvedValue({ habilitado: true });
+      const findUniqueCliente = jest
+        .fn()
+        .mockResolvedValue({ habilitado: true });
       const findUniqueCodigo = jest.fn().mockResolvedValue(null);
       const createPedido = jest.fn().mockResolvedValue({
         id: 10,
@@ -127,10 +144,12 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
           ExpressOrdersService,
           { provide: PrismaService, useValue: batchPrisma },
           { provide: NotificationsService, useValue: notificationsService },
+          { provide: RealtimeGateway, useValue: realtimeGateway },
         ],
       }).compile();
 
-      const createService = module.get<ExpressOrdersService>(ExpressOrdersService);
+      const createService =
+        module.get<ExpressOrdersService>(ExpressOrdersService);
 
       await createService.create('user-1', {
         itens: [
@@ -144,6 +163,107 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
       expect(findManyProdutoPedidoDireto).toHaveBeenCalledTimes(1);
       expect(batchPrisma.produto.findUnique).not.toHaveBeenCalled();
       expect(createPedido).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * O app assina `produtos_pedido_direto`, `variedades_pedido_direto` e
+   * `clientes_pedido_direto` via useRealtime, mas nada era publicado nessas
+   * salas: na migração do Supabase Realtime para o gateway próprio, só o
+   * fluxo de entrega foi religado. Sem estas emissões o catálogo do pedido
+   * direto só atualiza quando a tela é reaberta.
+   */
+  describe('emissões de realtime', () => {
+    const buildService = async (prisma: Record<string, unknown>) => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          ExpressOrdersService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: NotificationsService, useValue: notificationsService },
+          { provide: RealtimeGateway, useValue: realtimeGateway },
+        ],
+      }).compile();
+      return module.get<ExpressOrdersService>(ExpressOrdersService);
+    };
+
+    it('toggleProduct avisa a sala produtos_pedido_direto', async () => {
+      const svc = await buildService({
+        produtoPedidoDireto: {
+          findFirst: jest.fn().mockResolvedValue({ id: 5, produtoId: 12 }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ id: 5, produtoId: 12, habilitado: true }),
+          create: jest.fn(),
+        },
+      });
+
+      await svc.toggleProduct(12, true);
+
+      expect(realtimeGateway.broadcast).toHaveBeenCalledWith(
+        'produtos_pedido_direto',
+        'UPDATE',
+        { produtoId: 12, habilitado: true },
+      );
+    });
+
+    it('toggleProduct avisa também quando cria a relação', async () => {
+      const svc = await buildService({
+        produtoPedidoDireto: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn(),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 6, produtoId: 12, habilitado: false }),
+        },
+      });
+
+      await svc.toggleProduct(12, false);
+
+      expect(realtimeGateway.broadcast).toHaveBeenCalledWith(
+        'produtos_pedido_direto',
+        'UPDATE',
+        { produtoId: 12, habilitado: false },
+      );
+    });
+
+    it('toggleVariety avisa a sala variedades_pedido_direto', async () => {
+      const svc = await buildService({
+        variedadePedidoDireto: {
+          findUnique: jest.fn().mockResolvedValue({ id: 7, variedadeId: 34 }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ id: 7, variedadeId: 34, habilitado: false }),
+          create: jest.fn(),
+        },
+      });
+
+      await svc.toggleVariety(34, false);
+
+      expect(realtimeGateway.broadcast).toHaveBeenCalledWith(
+        'variedades_pedido_direto',
+        'UPDATE',
+        { variedadeId: 34, habilitado: false },
+      );
+    });
+
+    it('toggleClient avisa a sala clientes_pedido_direto', async () => {
+      const svc = await buildService({
+        clientePedidoDireto: {
+          upsert: jest.fn().mockResolvedValue({
+            id: 3,
+            usuarioId: 'user-1',
+            habilitado: true,
+          }),
+        },
+      });
+
+      await svc.toggleClient('user-1', true);
+
+      expect(realtimeGateway.broadcast).toHaveBeenCalledWith(
+        'clientes_pedido_direto',
+        'UPDATE',
+        { usuarioId: 'user-1', habilitado: true },
+      );
     });
   });
 });

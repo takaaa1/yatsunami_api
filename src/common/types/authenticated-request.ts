@@ -7,12 +7,12 @@ import type { Request } from 'express';
  * leitura de `req.user.id` vira acesso não verificado.
  */
 export interface AuthenticatedUser {
-    id: string;
-    email?: string;
-    role?: string;
+  id: string;
+  email?: string;
+  role?: string;
 }
 
 /** Request já autenticada — use com `@Req() req: AuthenticatedRequest`. */
 export interface AuthenticatedRequest extends Request {
-    user: AuthenticatedUser;
+  user: AuthenticatedUser;
 }

@@ -20,7 +20,10 @@ export class QrParserService {
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       };
 
-      const response = await axios.get<string>(url, { headers, timeout: 10000 });
+      const response = await axios.get<string>(url, {
+        headers,
+        timeout: 10000,
+      });
       const html = response.data;
       const $ = load(html);
 
@@ -54,7 +57,9 @@ export class QrParserService {
 
       return this.parseHtml($, url);
     } catch (error) {
-      this.logger.error(`Error parsing QR Code: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Error parsing QR Code: ${error instanceof Error ? error.message : String(error)}`,
+      );
       throw error;
     }
   }
