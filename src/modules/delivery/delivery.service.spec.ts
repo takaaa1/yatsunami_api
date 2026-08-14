@@ -29,6 +29,7 @@ describe('DeliveryService — rastreio de entrega', () => {
 
   let prisma: any;
   let service: DeliveryService;
+  let realtimeGateway: { broadcast: jest.Mock };
 
   const buildService = () => {
     prisma = {
@@ -71,11 +72,14 @@ describe('DeliveryService — rastreio de entrega', () => {
       ),
     };
 
+    realtimeGateway = { broadcast: jest.fn() };
+
     return new DeliveryService(
       prisma,
       {} as any, // RoutesService — não usado nestes cenários
       {} as any, // ConfiguracoesService — não usado nestes cenários
       cronLockService as any,
+      realtimeGateway as any,
     );
   };
 
@@ -87,22 +91,17 @@ describe('DeliveryService — rastreio de entrega', () => {
   });
 
   describe('handleStaleTracking (limpeza automática)', () => {
-    it('não encerra a entrega: nunca escreve em emEntrega', async () => {
-      // Cenário real do incidente: o entregador está parado numa entrega e a
-      // localização ficou sem atualizar. A rota existe e tem pedidos ativos.
-      const staleSession = {
-        id: 5,
-        formId: 10,
-        courierId: 1,
-        atualizadoEm: new Date(Date.now() - 30 * MINUTE_MS),
-      };
+    const staleSession = {
+      id: 5,
+      formId: 10,
+      courierId: 1,
+      atualizadoEm: new Date(Date.now() - 30 * MINUTE_MS),
+    };
+
+    beforeEach(() => {
       prisma.entregadorLocalizacao.findMany.mockResolvedValue([staleSession]);
       prisma.entregadorLocalizacao.deleteMany.mockResolvedValue({ count: 1 });
-
-      await service.handleStaleTracking();
-
-      expect(prisma.pedidoEncomenda.updateMany).not.toHaveBeenCalled();
-      expect(prisma.pedidoEncomenda.update).not.toHaveBeenCalled();
+      prisma.pedidoEncomenda.updateMany.mockResolvedValue({ count: 3 });
     });
 
     it('usa limiar de 20 minutos, maior que a parada planejada de 5 min', async () => {
@@ -110,19 +109,57 @@ describe('DeliveryService — rastreio de entrega', () => {
       await service.handleStaleTracking();
       const after = Date.now();
 
-      expect(prisma.entregadorLocalizacao.deleteMany).toHaveBeenCalledTimes(1);
+      // É esta folga que impede o incidente: com 2 min, uma parada planejada
+      // de 5 min era tratada como abandono e derrubava o rastreio da rota.
       const cutoff: Date =
-        prisma.entregadorLocalizacao.deleteMany.mock.calls[0][0].where
+        prisma.entregadorLocalizacao.findMany.mock.calls[0][0].where
           .atualizadoEm.lt;
-
-      // O corte precisa estar ~20 min atrás — uma parada de 5 min não pode ser atingida
       expect(cutoff.getTime()).toBeLessThanOrEqual(before - 20 * MINUTE_MS);
       expect(cutoff.getTime()).toBeGreaterThanOrEqual(after - 21 * MINUTE_MS);
     });
 
-    it('remove a linha abandonada (não deixa registro órfão reprocessando a cada minuto)', async () => {
-      prisma.entregadorLocalizacao.deleteMany.mockResolvedValue({ count: 2 });
+    it('não toca em nada quando não há sessão abandonada', async () => {
+      prisma.entregadorLocalizacao.findMany.mockResolvedValue([]);
 
+      await service.handleStaleTracking();
+
+      expect(prisma.pedidoEncomenda.updateMany).not.toHaveBeenCalled();
+      expect(prisma.entregadorLocalizacao.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('encerra a entrega dos pedidos da sessão abandonada', async () => {
+      await service.handleStaleTracking();
+
+      expect(prisma.pedidoEncomenda.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: [101, 102, 103] }, // paradas do entregador 1, sem o Retorno
+          emEntrega: true,
+          statusPagamento: { notIn: ['entregue', 'cancelado'] },
+        },
+        data: { emEntrega: false },
+      });
+    });
+
+    it('avisa os clientes por realtime ao encerrar', async () => {
+      await service.handleStaleTracking();
+
+      expect(realtimeGateway.broadcast).toHaveBeenCalledWith(
+        'pedidos_encomenda',
+        'UPDATE',
+        { id: 101, emEntrega: false },
+      );
+      expect(realtimeGateway.broadcast).toHaveBeenCalledTimes(3);
+    });
+
+    it('não avisa ninguém quando nenhum pedido estava em entrega', async () => {
+      prisma.pedidoEncomenda.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.handleStaleTracking();
+
+      expect(realtimeGateway.broadcast).not.toHaveBeenCalled();
+    });
+
+    it('remove a linha abandonada (não deixa registro órfão reprocessando a cada minuto)', async () => {
       await service.handleStaleTracking();
 
       expect(prisma.entregadorLocalizacao.deleteMany).toHaveBeenCalledWith({

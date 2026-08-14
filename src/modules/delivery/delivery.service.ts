@@ -12,6 +12,7 @@ import { UpdateLocationDto } from './dto/update-location.dto';
 import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { CronLockService } from '../../common/cron/cron-lock.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 import { ConfiguracaoFormularios, Prisma, RotaEntrega } from '@prisma/client';
 import {
@@ -39,6 +40,7 @@ export class DeliveryService {
     private readonly routesService: RoutesService,
     private readonly configuracoesService: ConfiguracoesService,
     private readonly cronLockService: CronLockService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async createRoute(createRouteDto: CreateRouteDto) {
@@ -1169,6 +1171,63 @@ export class DeliveryService {
         const staleDate = new Date();
         staleDate.setMinutes(staleDate.getMinutes() - STALE_THRESHOLD_MINUTES);
 
+        const staleSessions = await this.prisma.entregadorLocalizacao.findMany({
+          where: { atualizadoEm: { lt: staleDate } },
+        });
+
+        if (staleSessions.length === 0) return;
+
+        // Rede de segurança para o compartilhamento que morre de forma anormal
+        // (bateria, app encerrado, rede caindo): sem isto o pedido fica "em
+        // entrega" para sempre e o cliente vê um botão de rastreio sem ninguém
+        // do outro lado.
+        //
+        // O limiar é 20min — 4x a parada planejada de 5min, que era o que o
+        // antigo limiar de 2min não respeitava — e a chegada de qualquer
+        // localização reativa o rastreio automaticamente.
+        for (const session of staleSessions) {
+          const route = await this.prisma.rotaEntrega.findUnique({
+            where: { formId: session.formId },
+          });
+          if (!route?.nomesParadas) continue;
+
+          // courier_id nulo é linha legada: encerra a rota inteira, como o
+          // stopRouteSharing sem courierId.
+          const orderIds = this.collectOrderIds(
+            asRouteStops(route.nomesParadas),
+            session.courierId ?? undefined,
+          );
+          if (orderIds.length === 0) continue;
+
+          const { count: ended } = await this.prisma.pedidoEncomenda.updateMany(
+            {
+              where: {
+                id: { in: orderIds },
+                emEntrega: true,
+                statusPagamento: { notIn: ['entregue', 'cancelado'] },
+              },
+              data: { emEntrega: false },
+            },
+          );
+
+          if (ended > 0) {
+            for (const id of orderIds) {
+              this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', {
+                id,
+                emEntrega: false,
+              });
+            }
+            this.logger.warn(
+              `Entrega encerrada por abandono: form ${session.formId} / courier ${session.courierId ?? 'null'} ` +
+                `(${ended} pedidos, sem localização há ${STALE_THRESHOLD_MINUTES}min)`,
+            );
+          }
+
+          this.reactivationThrottle.delete(
+            `${session.formId}_${session.courierId ?? 1}`,
+          );
+        }
+
         const { count } = await this.prisma.entregadorLocalizacao.deleteMany({
           where: {
             atualizadoEm: { lt: staleDate },
@@ -1177,8 +1236,7 @@ export class DeliveryService {
 
         if (count > 0) {
           this.logger.log(
-            `Removidas ${count} localizações abandonadas (sem atualização há ${STALE_THRESHOLD_MINUTES}min). ` +
-              `Status de entrega dos pedidos preservado.`,
+            `Removidas ${count} localizações abandonadas (sem atualização há ${STALE_THRESHOLD_MINUTES}min).`,
           );
         }
       },
