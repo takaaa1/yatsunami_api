@@ -25,16 +25,16 @@ export type BroadcastEventType = 'INSERT' | 'UPDATE' | 'DELETE';
  * refazer a busca sem motivo.
  */
 export async function broadcastAfter<T>(
-    gateway: RealtimeGateway,
-    table: string,
-    eventType: BroadcastEventType,
-    operacao: Promise<T>,
-    registro: (resultado: T) => Record<string, unknown> | null,
+  gateway: RealtimeGateway,
+  table: string,
+  eventType: BroadcastEventType,
+  operacao: Promise<T>,
+  registro: (resultado: T) => Record<string, unknown> | null,
 ): Promise<T> {
-    const resultado = await operacao;
-    const evento = registro(resultado);
-    if (evento) {
-        gateway.broadcast(table, eventType, evento);
-    }
-    return resultado;
+  const resultado = await operacao;
+  const evento = registro(resultado);
+  if (evento) {
+    gateway.broadcast(table, eventType, evento);
+  }
+  return resultado;
 }

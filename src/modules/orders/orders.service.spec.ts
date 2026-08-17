@@ -27,12 +27,19 @@ describe('OrdersService (perf Fase 2)', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ConfiguracoesService, useValue: {} },
         { provide: StorageService, useValue: {} },
-        { provide: NotificationsService, useValue: { createAndSendNotification: jest.fn() } },
+        {
+          provide: NotificationsService,
+          useValue: { createAndSendNotification: jest.fn() },
+        },
         {
           provide: CronLockService,
           useValue: {
             enabled: () => true,
-            withLock: async (_key: number, _name: string, fn: () => Promise<void>) => fn(),
+            withLock: async (
+              _key: number,
+              _name: string,
+              fn: () => Promise<void>,
+            ) => fn(),
           },
         },
         { provide: RealtimeGateway, useValue: { broadcast: jest.fn() } },
@@ -86,7 +93,10 @@ describe('OrdersService (perf Fase 2)', () => {
       mockPrisma.pedidoEncomenda.updateMany
         .mockResolvedValueOnce({ count: 2 })
         .mockResolvedValueOnce({ count: 1 });
-      mockPrisma.pedidoEncomenda.findMany.mockResolvedValue([{ id: 10 }, { id: 11 }]);
+      mockPrisma.pedidoEncomenda.findMany.mockResolvedValue([
+        { id: 10 },
+        { id: 11 },
+      ]);
 
       await service.syncPaymentLockStatuses();
 

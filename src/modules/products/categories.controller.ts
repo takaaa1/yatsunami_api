@@ -17,7 +17,10 @@ import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
+import {
+  broadcastAfter,
+  type BroadcastEventType,
+} from '../../common/realtime/broadcast-after';
 
 @ApiTags('categories')
 @Controller('categories')
@@ -32,9 +35,15 @@ export class CategoriesController {
     eventType: BroadcastEventType,
     operacao: Promise<T>,
   ): Promise<T> {
-    return broadcastAfter(this.realtimeGateway, 'categorias', eventType, operacao, (c) => ({
-      id: c.id,
-    }));
+    return broadcastAfter(
+      this.realtimeGateway,
+      'categorias',
+      eventType,
+      operacao,
+      (c) => ({
+        id: c.id,
+      }),
+    );
   }
 
   @Post()
@@ -43,7 +52,10 @@ export class CategoriesController {
   @Roles('admin')
   @ApiOperation({ summary: 'Create a new category' })
   create(@Body() createCategoryDto: CreateCategoryDto) {
-    return this.comBroadcast('INSERT', this.categoriesService.create(createCategoryDto));
+    return this.comBroadcast(
+      'INSERT',
+      this.categoriesService.create(createCategoryDto),
+    );
   }
 
   @Get()
@@ -67,7 +79,10 @@ export class CategoriesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
   ) {
-    return this.comBroadcast('UPDATE', this.categoriesService.update(id, updateCategoryDto));
+    return this.comBroadcast(
+      'UPDATE',
+      this.categoriesService.update(id, updateCategoryDto),
+    );
   }
 
   @Delete(':id')

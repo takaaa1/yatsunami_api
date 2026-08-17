@@ -27,7 +27,10 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
+import {
+  broadcastAfter,
+  type BroadcastEventType,
+} from '../../common/realtime/broadcast-after';
 
 @ApiTags('products')
 @Controller('products')
@@ -45,9 +48,15 @@ export class ProductsController {
     eventType: BroadcastEventType,
     operacao: Promise<T>,
   ): Promise<T> {
-    return broadcastAfter(this.realtimeGateway, 'produtos', eventType, operacao, (p) => ({
-      id: p.id,
-    }));
+    return broadcastAfter(
+      this.realtimeGateway,
+      'produtos',
+      eventType,
+      operacao,
+      (p) => ({
+        id: p.id,
+      }),
+    );
   }
 
   @Post()
@@ -56,7 +65,10 @@ export class ProductsController {
   @Roles('admin')
   @ApiOperation({ summary: 'Create a new product' })
   create(@Body() createProductDto: CreateProductDto) {
-    return this.comBroadcast('INSERT', this.productsService.create(createProductDto));
+    return this.comBroadcast(
+      'INSERT',
+      this.productsService.create(createProductDto),
+    );
   }
 
   @Get()
@@ -80,7 +92,10 @@ export class ProductsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateProductDto: UpdateProductDto,
   ) {
-    return this.comBroadcast('UPDATE', this.productsService.update(id, updateProductDto));
+    return this.comBroadcast(
+      'UPDATE',
+      this.productsService.update(id, updateProductDto),
+    );
   }
 
   @Delete(':id')
