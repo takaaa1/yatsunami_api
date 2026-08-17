@@ -9,6 +9,7 @@ import {
 import { Cron } from '@nestjs/schedule';
 import { CronLockService } from '../../common/cron/cron-lock.service';
 import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class NotificationsService {
@@ -18,9 +19,28 @@ export class NotificationsService {
   constructor(
     private prisma: PrismaService,
     private cronLockService: CronLockService,
+    private realtimeGateway: RealtimeGateway,
   ) {
     this.expo = new Expo({
       accessToken: process.env.EXPO_ACCESS_TOKEN,
+    });
+  }
+
+  /**
+   * Avisa **só os aparelhos do dono** que a inbox dele mudou.
+   *
+   * Vai na sala `user:<id>`, não na sala da tabela: o destinatário de uma
+   * notificação é dado pessoal. O registro carrega o mínimo — a tela refaz a
+   * busca de qualquer forma, porque a lista é paginada e ordenada no servidor.
+   */
+  private avisaInbox(
+    usuarioId: string,
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE',
+    registro: Record<string, unknown> = {},
+  ) {
+    this.realtimeGateway.broadcastToUser(usuarioId, 'notificacoes', eventType, {
+      usuarioId,
+      ...registro,
     });
   }
 
@@ -75,6 +95,11 @@ export class NotificationsService {
         tipo: data.tipo || 'user',
       },
     });
+
+    // 1b. Avisar a inbox antes de tentar o push. O push é o caminho que pode
+    // falhar (token inválido, aparelho sem permissão); o realtime não depende
+    // dele, e o sino precisa acender mesmo com o app já aberto na frente.
+    this.avisaInbox(data.usuarioId, 'INSERT', { id: notificacao.id });
 
     // 2. Buscar token, preferência e idioma do usuário
     const usuario = await this.prisma.usuario.findUnique({
@@ -139,24 +164,41 @@ export class NotificationsService {
     });
   }
 
+  // Os três métodos abaixo usam `updateMany`/`deleteMany` com `usuarioId` no
+  // filtro — é assim que a posse é verificada. Por isso o `count` manda no
+  // aviso: zero significa que a notificação não era desta pessoa, e emitir
+  // faria os aparelhos dela recarregarem à toa.
+
   async markAsRead(id: string, usuarioId: string) {
-    return this.prisma.notificacao.updateMany({
+    const resultado = await this.prisma.notificacao.updateMany({
       where: { id, usuarioId },
       data: { lido: true },
     });
+    if (resultado.count > 0) {
+      this.avisaInbox(usuarioId, 'UPDATE', { id, lido: true });
+    }
+    return resultado;
   }
 
   async markAllAsRead(usuarioId: string) {
-    return this.prisma.notificacao.updateMany({
+    const resultado = await this.prisma.notificacao.updateMany({
       where: { usuarioId, lido: false },
       data: { lido: true },
     });
+    if (resultado.count > 0) {
+      this.avisaInbox(usuarioId, 'UPDATE');
+    }
+    return resultado;
   }
 
   async deleteOne(id: string, usuarioId: string) {
-    return this.prisma.notificacao.deleteMany({
+    const resultado = await this.prisma.notificacao.deleteMany({
       where: { id, usuarioId },
     });
+    if (resultado.count > 0) {
+      this.avisaInbox(usuarioId, 'DELETE', { id });
+    }
+    return resultado;
   }
 
   @Cron('0 3 * * *') // Daily at 03:00
@@ -314,6 +356,9 @@ export class NotificationsService {
 
       for (const notificacao of created) {
         notificacaoIdByUserId.set(notificacao.usuarioId, notificacao.id);
+        // Um aviso por destinatário, cada um na sua sala. O broadcast pode
+        // atingir centenas de pessoas, mas ninguém recebe o id de outro.
+        this.avisaInbox(notificacao.usuarioId, 'INSERT', { id: notificacao.id });
       }
     }
 

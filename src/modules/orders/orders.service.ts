@@ -310,6 +310,12 @@ export class OrdersService {
       if (!existingCode) isUnique = true;
     }
 
+    // Quem tinha notificação de cancelamento apagada na reciclagem abaixo. É
+    // preciso ler antes de apagar: `deleteMany` só devolve a contagem, e os
+    // donos não são um só — o cancelamento feito pelo cliente notifica os
+    // admins, e o feito pelo admin notifica o cliente.
+    let donosDeNotificacaoLimpa: string[] = [];
+
     // Create or reuse cancelled order with transaction to ensure integrity
     const order = await this.prisma.$transaction(async (tx) => {
       if (existingOrder && existingOrder.statusPagamento === 'cancelado') {
@@ -317,17 +323,25 @@ export class OrdersService {
           where: { pedidoId: existingOrder.id },
         });
         // Cleanup stale cancellation notifications tied to this recycled order.
-        await tx.notificacao.deleteMany({
-          where: {
-            pedidoEncomendaId: existingOrder.id,
-            titulo: {
-              in: [
-                'notification.orderCancelledByUser.title',
-                'notification.orderCancelledByAdmin.title',
-              ],
-            },
+        const filtroObsoletas = {
+          pedidoEncomendaId: existingOrder.id,
+          titulo: {
+            in: [
+              'notification.orderCancelledByUser.title',
+              'notification.orderCancelledByAdmin.title',
+            ],
           },
+        };
+
+        const obsoletas = await tx.notificacao.findMany({
+          where: filtroObsoletas,
+          select: { usuarioId: true },
         });
+        donosDeNotificacaoLimpa = [
+          ...new Set(obsoletas.map((n) => n.usuarioId)),
+        ];
+
+        await tx.notificacao.deleteMany({ where: filtroObsoletas });
 
         const recycledOrder = await tx.pedidoEncomenda.update({
           where: { id: existingOrder.id },
@@ -399,6 +413,15 @@ export class OrdersService {
 
       return newOrder;
     });
+
+    // Só depois do commit: se a transação voltasse atrás, as notificações
+    // continuariam lá e o aviso teria mandado apagar da tela o que existe.
+    for (const usuarioId of donosDeNotificacaoLimpa) {
+      this.realtimeGateway.broadcastToUser(usuarioId, 'notificacoes', 'DELETE', {
+        usuarioId,
+        pedidoEncomendaId: order.id,
+      });
+    }
 
     // Notificar administradores sobre o novo pedido
     try {
