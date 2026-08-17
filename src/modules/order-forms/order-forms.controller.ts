@@ -9,6 +9,7 @@ import { CurrentUser, Roles } from '../../common/decorators';
 import { PdfService } from '../pdf/pdf.service';
 import { BackgroundJobService } from '../../common/jobs/background-job.service';
 import { PdfJobResult } from '../../common/jobs/background-job.types';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @ApiTags('order-forms')
 @ApiTags('order-forms')
@@ -18,7 +19,31 @@ export class OrderFormsController {
         private readonly orderFormsService: OrderFormsService,
         private readonly pdfService: PdfService,
         private readonly backgroundJobService: BackgroundJobService,
+        private readonly realtimeGateway: RealtimeGateway,
     ) { }
+
+    /**
+     * Executa a mutação e, **só se ela concluir**, avisa as telas que listam
+     * formulários.
+     *
+     * O que mais importa aqui é ativar ou desativar: o admin abre o formulário
+     * e os clientes precisam ver "Novo Pedido" liberado sem reabrir o app.
+     *
+     * `ativo` e `concluido` vão junto porque decidem se o formulário aparece
+     * para o cliente — quem escuta pode reagir sem refazer a busca à toa.
+     */
+    private async comBroadcast<T extends { id: number; ativo?: boolean; concluido?: boolean }>(
+        eventType: 'INSERT' | 'UPDATE' | 'DELETE',
+        operacao: Promise<T>,
+    ): Promise<T> {
+        const formulario = await operacao;
+        this.realtimeGateway.broadcast('datas_encomenda', eventType, {
+            id: formulario.id,
+            ativo: formulario.ativo ?? null,
+            concluido: formulario.concluido ?? null,
+        });
+        return formulario;
+    }
 
     @Post()
     @ApiBearerAuth('JWT')
@@ -26,7 +51,7 @@ export class OrderFormsController {
     @Roles('admin')
     @ApiOperation({ summary: 'Create a new order form (Admin)' })
     create(@Body() createDto: CreateOrderFormDto) {
-        return this.orderFormsService.create(createDto);
+        return this.comBroadcast('INSERT', this.orderFormsService.create(createDto));
     }
 
     @Get()
@@ -82,7 +107,7 @@ export class OrderFormsController {
         @Body() updateDto: UpdateOrderFormDto,
         @CurrentUser('id') adminUserId: string
     ) {
-        return this.orderFormsService.update(id, updateDto, adminUserId);
+        return this.comBroadcast('UPDATE', this.orderFormsService.update(id, updateDto, adminUserId));
     }
 
     @Delete(':id')
@@ -91,7 +116,7 @@ export class OrderFormsController {
     @Roles('admin')
     @ApiOperation({ summary: 'Delete an order form (Admin)' })
     remove(@Param('id', ParseIntPipe) id: number) {
-        return this.orderFormsService.remove(id);
+        return this.comBroadcast('DELETE', this.orderFormsService.remove(id));
     }
 
     @Post(':id/pdf-summary')

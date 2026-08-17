@@ -114,8 +114,13 @@ describe('DeliveryService — rastreio de entrega', () => {
       const cutoff: Date =
         prisma.entregadorLocalizacao.findMany.mock.calls[0][0].where
           .atualizadoEm.lt;
-      expect(cutoff.getTime()).toBeLessThanOrEqual(before - 20 * MINUTE_MS);
-      expect(cutoff.getTime()).toBeGreaterThanOrEqual(after - 21 * MINUTE_MS);
+      // O serviço calcula `agora - 20 min` num instante T qualquer entre
+      // `before` e `after`, então o corte cai na janela
+      // [before - 20min, after - 20min]. Comparar o teto com `before` — como
+      // estava — só passava quando T === before: falhava por 1 ms em cerca de
+      // 1 a cada 5 execuções.
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(before - 20 * MINUTE_MS);
+      expect(cutoff.getTime()).toBeLessThanOrEqual(after - 20 * MINUTE_MS);
     });
 
     it('não toca em nada quando não há sessão abandonada', async () => {
