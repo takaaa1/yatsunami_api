@@ -17,6 +17,7 @@ import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 import { generateOrderCode } from '../../common/utils/string-utils';
 import { Prisma } from '@prisma/client';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class OrdersService {
@@ -28,6 +29,7 @@ export class OrdersService {
     private storageService: StorageService,
     private notificationsService: NotificationsService,
     private cronLockService: CronLockService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   private formatAddress(
@@ -491,6 +493,18 @@ export class OrdersService {
         });
       }),
     );
+
+    // Avisa as telas de **todos** os pedidos afetados, não só o que originou a
+    // mudança: entrar ou sair de um ponto de entrega comum altera a taxa e o
+    // total de quem já estava lá. Sem isto, esses clientes veem um valor
+    // desatualizado até recarregar a tela na mão.
+    for (const order of orders) {
+      this.realtimeGateway.broadcast('pedidos_encomenda', 'UPDATE', {
+        id: order.id,
+        dataEncomendaId,
+        statusPagamento: order.statusPagamento,
+      });
+    }
   }
 
   async findByOrderForm(

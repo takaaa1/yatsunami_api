@@ -6,19 +6,47 @@ import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @ApiTags('Orders')
 @Controller('orders')
 @UseGuards(AuthGuard('jwt'))
 @ApiBearerAuth('JWT')
 export class OrdersController {
-    constructor(private readonly ordersService: OrdersService) { }
+    constructor(
+        private readonly ordersService: OrdersService,
+        private readonly realtimeGateway: RealtimeGateway,
+    ) { }
+
+    /**
+     * Executa a mutação e, **só se ela concluir**, avisa as telas que exibem o
+     * pedido.
+     *
+     * Fica no controlador porque cada endpoint tem uma saída só — os métodos do
+     * serviço têm vários `return`, e emitir em cada um seria fácil de esquecer
+     * ao mexer depois. O `delivery.controller.ts` já emite deste mesmo lugar.
+     *
+     * `dataEncomendaId` vai junto porque a lista do formulário
+     * (`(admin)/order-forms/orders.tsx`) filtra por ele; sem o campo, toda tela
+     * de formulário aberta refaz a busca a cada evento de qualquer formulário.
+     */
+    private async comBroadcast<
+        T extends { id: number; dataEncomendaId?: number | null; statusPagamento?: string | null },
+    >(eventType: 'INSERT' | 'UPDATE', operacao: Promise<T>): Promise<T> {
+        const pedido = await operacao;
+        this.realtimeGateway.broadcast('pedidos_encomenda', eventType, {
+            id: pedido.id,
+            dataEncomendaId: pedido.dataEncomendaId ?? null,
+            statusPagamento: pedido.statusPagamento ?? null,
+        });
+        return pedido;
+    }
 
     @Post()
     @ApiOperation({ summary: 'Criar um novo pedido' })
     @ApiResponse({ status: 201, description: 'Pedido criado com sucesso' })
     create(@CurrentUser('id') userId: string, @Body() createOrderDto: CreateOrderDto) {
-        return this.ordersService.create(userId, createOrderDto);
+        return this.comBroadcast('INSERT', this.ordersService.create(userId, createOrderDto));
     }
 
     @Get()
@@ -59,7 +87,7 @@ export class OrdersController {
         @CurrentUser('id') userId: string,
         @Body() updateOrderDto: UpdateOrderDto
     ) {
-        return this.ordersService.update(id, userId, updateOrderDto);
+        return this.comBroadcast('UPDATE', this.ordersService.update(id, userId, updateOrderDto));
     }
 
     @Post(':id/cancel')
@@ -72,7 +100,7 @@ export class OrdersController {
         @Param('id', ParseIntPipe) id: number,
         @CurrentUser('id') userId: string
     ) {
-        return this.ordersService.cancelMyOrder(id, userId);
+        return this.comBroadcast('UPDATE', this.ordersService.cancelMyOrder(id, userId));
     }
 
     @Patch(':id/receipt')
@@ -98,7 +126,7 @@ export class OrdersController {
         @CurrentUser('id') userId: string,
         @UploadedFile() file: Express.Multer.File
     ) {
-        return this.ordersService.updateReceipt(id, userId, file);
+        return this.comBroadcast('UPDATE', this.ordersService.updateReceipt(id, userId, file));
     }
 
     // Admin endpoints
@@ -110,7 +138,7 @@ export class OrdersController {
     @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
     @ApiResponse({ status: 400, description: 'Operação inválida' })
     confirmPayment(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.ordersService.confirmPayment(id, adminUserId);
+        return this.comBroadcast('UPDATE', this.ordersService.confirmPayment(id, adminUserId));
     }
 
     @Post(':id/revert-payment')
@@ -121,7 +149,7 @@ export class OrdersController {
     @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
     @ApiResponse({ status: 400, description: 'Operação inválida' })
     revertPayment(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.ordersService.revertPayment(id, adminUserId);
+        return this.comBroadcast('UPDATE', this.ordersService.revertPayment(id, adminUserId));
     }
 
     @Post(':id/reject-payment')
@@ -132,7 +160,7 @@ export class OrdersController {
     @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
     @ApiResponse({ status: 400, description: 'Operação inválida' })
     rejectPayment(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.ordersService.rejectPayment(id, adminUserId);
+        return this.comBroadcast('UPDATE', this.ordersService.rejectPayment(id, adminUserId));
     }
 
     @Delete(':id')
@@ -143,7 +171,7 @@ export class OrdersController {
     @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
     @ApiResponse({ status: 400, description: 'Operação inválida' })
     cancelOrder(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.ordersService.cancelOrder(id, adminUserId);
+        return this.comBroadcast('UPDATE', this.ordersService.cancelOrder(id, adminUserId));
     }
 
     @Post(':id/revert-cancellation')
@@ -154,7 +182,7 @@ export class OrdersController {
     @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
     @ApiResponse({ status: 400, description: 'Operação inválida' })
     revertCancellation(@Param('id', ParseIntPipe) id: number, @CurrentUser('id') adminUserId: string) {
-        return this.ordersService.revertCancellation(id, adminUserId);
+        return this.comBroadcast('UPDATE', this.ordersService.revertCancellation(id, adminUserId));
     }
 
     @Get('form/:formId')

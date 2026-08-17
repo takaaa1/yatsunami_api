@@ -5,6 +5,7 @@ import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { StorageService } from '../../config/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CronLockService } from '../../common/cron/cron-lock.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 describe('OrdersService (perf Fase 2)', () => {
   let service: OrdersService;
@@ -34,6 +35,7 @@ describe('OrdersService (perf Fase 2)', () => {
             withLock: async (_key: number, _name: string, fn: () => Promise<void>) => fn(),
           },
         },
+        { provide: RealtimeGateway, useValue: { broadcast: jest.fn() } },
       ],
     }).compile();
 
