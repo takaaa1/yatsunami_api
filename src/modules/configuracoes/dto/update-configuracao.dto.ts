@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsString, IsOptional, IsEnum, IsNumber, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Sanitized } from '../../../common/decorators/sanitized.decorator';
@@ -39,21 +40,25 @@ export class UpdateConfiguracaoDto {
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     taxaEntregaBase?: number;
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     valorMinimoTaxaReduzida?: number;
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     taxaEntregaReduzida?: number;
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     valorMinimoIsencao?: number;
 

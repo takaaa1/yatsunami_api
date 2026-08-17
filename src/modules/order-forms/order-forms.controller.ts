@@ -56,8 +56,8 @@ export class OrderFormsController {
     @Roles('admin')
     @ApiOperation({ summary: 'List all order forms' })
     findAll(
-        @Query('skip') skip?: number,
-        @Query('take') take?: number,
+        @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
+        @Query('take', new ParseIntPipe({ optional: true })) take?: number,
     ) {
         return this.orderFormsService.findAll(
             Number(skip) || 0,

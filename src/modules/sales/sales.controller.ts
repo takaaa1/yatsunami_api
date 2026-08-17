@@ -44,8 +44,8 @@ export class SalesController {
     @ApiOperation({ summary: 'Listar histórico de vendas' })
     @ApiResponse({ status: 200, description: 'Lista de vendas retornada' })
     findAll(
-        @Query('limit') limit?: number,
-        @Query('offset') offset?: number,
+        @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+        @Query('offset', new ParseIntPipe({ optional: true })) offset?: number,
         @Query('search') search?: string,
         @Query('dateFrom') dateFrom?: string,
         @Query('dateTo') dateTo?: string,

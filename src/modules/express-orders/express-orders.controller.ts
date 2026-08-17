@@ -47,8 +47,8 @@ export class ExpressOrdersController {
   @ApiOperation({ summary: 'List all express orders (Admin)' })
   findAll(
     @Query('status') status?: string,
-    @Query('skip') skip?: number,
-    @Query('take') take?: number,
+    @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
+    @Query('take', new ParseIntPipe({ optional: true })) take?: number,
   ) {
     return this.expressOrdersService.findAll(
       status,
@@ -61,8 +61,8 @@ export class ExpressOrdersController {
   @ApiOperation({ summary: 'List my express orders' })
   findMyOrders(
     @Req() req: AuthenticatedRequest,
-    @Query('skip') skip?: number,
-    @Query('take') take?: number,
+    @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
+    @Query('take', new ParseIntPipe({ optional: true })) take?: number,
   ) {
     return this.expressOrdersService.findMyOrders(
       req.user.id,

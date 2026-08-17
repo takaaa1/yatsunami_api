@@ -11,16 +11,19 @@ export class CreateExpenseItemDto {
     descricao: string;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     quantidade: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsOptional()
     valorUnitario?: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     valor: number;
@@ -39,16 +42,19 @@ export class CreateExpenseDto {
     dataCompra?: string;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     valorTotal: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsOptional()
     valorTotalSemDesconto?: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsOptional()
     valorDesconto?: number;

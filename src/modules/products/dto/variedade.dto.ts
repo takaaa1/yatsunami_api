@@ -12,6 +12,7 @@ export class CreateVariedadeDto {
     nome: I18nStringDto;
 
     @ApiProperty({ example: 10.00 })
+    @Type(() => Number)
     @IsNumber()
     @Min(0)
     preco: number;
@@ -24,6 +25,7 @@ export class CreateVariedadeDto {
 
     @ApiProperty({ example: 1, required: false, default: 1 })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     @Min(1)
     quantidade?: number;
@@ -55,6 +57,7 @@ export class CreateVariedadeDto {
 export class UpdateVariedadeDto extends CreateVariedadeDto {
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     id?: number;
 }

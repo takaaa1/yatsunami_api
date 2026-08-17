@@ -26,10 +26,12 @@ export class CreateRouteDestinationDto {
   cep?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   latitude?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   longitude?: number;
 
@@ -38,11 +40,13 @@ export class CreateRouteDestinationDto {
   name: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   orderId?: number;
 
   @IsOptional()
   @IsArray()
+  @Type(() => Number)
   @IsInt({ each: true })
   orderIds?: number[];
 
@@ -51,6 +55,7 @@ export class CreateRouteDestinationDto {
    * Enviado pelo cliente: 300 por defeito; pontos especiais = 300 × número de encomendas no ponto.
    */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   serviceStopSeconds?: number;
 
@@ -66,6 +71,7 @@ export class CreateRouteDestinationDto {
 }
 
 export class CreateRouteDto {
+  @Type(() => Number)
   @IsNumber()
   formId: number;
 
@@ -85,6 +91,7 @@ export class CreateRouteDto {
   departureTime?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   couriers?: number;
 

@@ -3,13 +3,16 @@ import { Type } from 'class-transformer';
 import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 class CreateExpressOrderItemDto {
+  @Type(() => Number)
   @IsInt()
   produtoId: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   variedadeId?: number;
 
+  @Type(() => Number)
   @IsInt()
   quantidade: number;
 }

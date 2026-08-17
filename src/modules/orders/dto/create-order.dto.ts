@@ -8,10 +8,12 @@ import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 export class CreateOrderDto {
     @ApiProperty({ example: 1, description: 'ID da data de encomenda' })
     @IsNotEmpty()
+    @Type(() => Number)
     @IsNumber()
     dataEncomendaId: number;
 
     @ApiProperty({ example: 2, description: 'Quantidade de talheres', default: 0 })
+    @Type(() => Number)
     @IsNumber()
     @Min(0)
     talheres: number = 0;
@@ -36,12 +38,14 @@ export class CreateOrderDto {
 
     @ApiProperty({ example: 10.00, description: 'Taxa de entrega', default: 0 })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     @Min(0)
     taxaEntrega?: number = 0;
 
     @ApiProperty({ example: 150.00, description: 'Valor total do pedido', required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     @Min(0)
     totalValor?: number;

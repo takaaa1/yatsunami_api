@@ -14,10 +14,12 @@ import { Sanitized } from '../../../common/decorators/sanitized.decorator';
 
 class SelectionDto {
   @ApiProperty()
+  @Type(() => Number)
   @IsNumber()
   product_id: number;
 
   @ApiProperty({ required: false })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   variedade_id?: number | null;

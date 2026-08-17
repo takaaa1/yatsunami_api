@@ -10,21 +10,25 @@ export enum DiscountType {
 
 export class CreateSaleItemDto {
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     produtoId: number;
 
     @ApiProperty()
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     variedadeId?: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     quantidade: number;
 
     @ApiProperty()
+    @Type(() => Number)
     @IsNumber()
     @IsNotEmpty()
     precoUnitario: number;
@@ -36,6 +40,7 @@ export class CreateSaleItemDto {
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     valorDesconto?: number;
 }
@@ -60,11 +65,13 @@ export class CreateSaleDto {
 
     @ApiProperty({ required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     descontoGeralValor?: number;
 
     @ApiProperty({ required: false, description: 'Delivery fee to add to the sale total' })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     taxaEntrega?: number;
 

@@ -19,6 +19,7 @@ export class UpdateOrderDto {
     required: false,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   dataEncomendaId?: number;
 
@@ -28,6 +29,7 @@ export class UpdateOrderDto {
     required: false,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   totalValor?: number;
@@ -38,6 +40,7 @@ export class UpdateOrderDto {
     required: false,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   taxaEntrega?: number;
@@ -48,6 +51,7 @@ export class UpdateOrderDto {
     required: false,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   talheres?: number;

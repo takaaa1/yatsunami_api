@@ -14,6 +14,7 @@ export class CreateProductDto {
 
     @ApiProperty({ example: 45.00, required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     @Min(0)
     preco?: number;
@@ -26,6 +27,7 @@ export class CreateProductDto {
 
     @ApiProperty({ example: 1, required: false, default: 1 })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     @Min(1)
     quantidade?: number;

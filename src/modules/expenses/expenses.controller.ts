@@ -55,8 +55,8 @@ export class ExpensesController {
     @ApiOperation({ summary: 'Listar histórico de despesas' })
     @ApiResponse({ status: 200, description: 'Lista de despesas retornada' })
     findAll(
-        @Query('limit') limit?: number,
-        @Query('offset') offset?: number,
+        @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+        @Query('offset', new ParseIntPipe({ optional: true })) offset?: number,
         @Query('search') search?: string,
         @Query('dateFrom') dateFrom?: string,
         @Query('dateTo') dateTo?: string,

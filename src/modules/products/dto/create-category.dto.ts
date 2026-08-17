@@ -11,6 +11,7 @@ export class CreateCategoryDto {
 
     @ApiProperty({ example: 1, required: false })
     @IsOptional()
+    @Type(() => Number)
     @IsNumber()
     ordem?: number;
 }

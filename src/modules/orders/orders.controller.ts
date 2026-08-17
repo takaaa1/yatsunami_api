@@ -46,8 +46,8 @@ export class OrdersController {
     @ApiResponse({ status: 200, description: 'Lista de pedidos retornada' })
     findAll(
         @CurrentUser('id') userId: string,
-        @Query('skip') skip?: number,
-        @Query('take') take?: number,
+        @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
+        @Query('take', new ParseIntPipe({ optional: true })) take?: number,
     ) {
         return this.ordersService.findAll(userId, Number(skip) || 0, Number(take) || 10);
     }
@@ -185,8 +185,8 @@ export class OrdersController {
     findByOrderForm(
         @Param('formId') formId: string,
         @Query('search') search?: string,
-        @Query('skip') skip?: number,
-        @Query('take') take?: number,
+        @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
+        @Query('take', new ParseIntPipe({ optional: true })) take?: number,
     ) {
         return this.ordersService.findByOrderForm(
             +formId,

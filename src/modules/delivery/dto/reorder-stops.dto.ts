@@ -35,23 +35,28 @@ export class RotaParadaDto {
   cep?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   orderId?: number | null;
 
   @IsOptional()
   @IsArray()
+  @Type(() => Number)
   @IsInt({ each: true })
   orderIds?: number[];
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   courierId?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   latitude?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   longitude?: number;
 
@@ -62,6 +67,7 @@ export class RotaParadaDto {
 
   /** Segundos de parada após chegada (p.ex. ponto especial); usado ao recalcular horários após reorder. */
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   serviceStopSeconds?: number;
 
