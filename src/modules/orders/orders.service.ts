@@ -417,10 +417,15 @@ export class OrdersService {
     // Só depois do commit: se a transação voltasse atrás, as notificações
     // continuariam lá e o aviso teria mandado apagar da tela o que existe.
     for (const usuarioId of donosDeNotificacaoLimpa) {
-      this.realtimeGateway.broadcastToUser(usuarioId, 'notificacoes', 'DELETE', {
+      this.realtimeGateway.broadcastToUser(
         usuarioId,
-        pedidoEncomendaId: order.id,
-      });
+        'notificacoes',
+        'DELETE',
+        {
+          usuarioId,
+          pedidoEncomendaId: order.id,
+        },
+      );
     }
 
     // Notificar administradores sobre o novo pedido

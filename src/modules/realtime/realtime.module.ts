@@ -10,16 +10,16 @@ import { RealtimeGateway } from './realtime.gateway';
  */
 @Global()
 @Module({
-    imports: [
-        JwtModule.registerAsync({
-            imports: [ConfigModule],
-            inject: [ConfigService],
-            useFactory: (config: ConfigService) => ({
-                secret: config.get<string>('jwt.secret') as string,
-            }),
-        }),
-    ],
-    providers: [RealtimeGateway],
-    exports: [RealtimeGateway],
+  imports: [
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('jwt.secret') as string,
+      }),
+    }),
+  ],
+  providers: [RealtimeGateway],
+  exports: [RealtimeGateway],
 })
-export class RealtimeModule { }
+export class RealtimeModule {}

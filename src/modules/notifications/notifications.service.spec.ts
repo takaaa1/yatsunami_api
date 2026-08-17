@@ -16,7 +16,11 @@ describe('NotificationsService', () => {
           provide: CronLockService,
           useValue: {
             enabled: () => true,
-            withLock: async (_key: number, _name: string, fn: () => Promise<void>) => fn(),
+            withLock: async (
+              _key: number,
+              _name: string,
+              fn: () => Promise<void>,
+            ) => fn(),
           },
         },
         {

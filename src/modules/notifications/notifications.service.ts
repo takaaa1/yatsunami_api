@@ -358,7 +358,9 @@ export class NotificationsService {
         notificacaoIdByUserId.set(notificacao.usuarioId, notificacao.id);
         // Um aviso por destinatário, cada um na sua sala. O broadcast pode
         // atingir centenas de pessoas, mas ninguém recebe o id de outro.
-        this.avisaInbox(notificacao.usuarioId, 'INSERT', { id: notificacao.id });
+        this.avisaInbox(notificacao.usuarioId, 'INSERT', {
+          id: notificacao.id,
+        });
       }
     }
 
