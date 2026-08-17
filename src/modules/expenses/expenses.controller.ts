@@ -5,13 +5,34 @@ import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagg
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
 
 @ApiTags('Expenses')
 @Controller('expenses')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @ApiBearerAuth('JWT')
 export class ExpensesController {
-    constructor(private readonly expensesService: ExpensesService) { }
+    constructor(
+        private readonly expensesService: ExpensesService,
+        private readonly realtimeGateway: RealtimeGateway,
+    ) { }
+
+    /**
+     * Despesa entra na lista do admin e no lucro do dashboard.
+     *
+     * O retorno do serviço é anulável — `create` e `update` incluem os itens
+     * via `findUnique`, que pode não achar. Sem registro não há o que avisar,
+     * então a emissão é pulada em vez de sair um evento sem `id`.
+     */
+    private comBroadcast<T extends { id: number } | null>(
+        eventType: BroadcastEventType,
+        operacao: Promise<T>,
+    ): Promise<T> {
+        return broadcastAfter(this.realtimeGateway, 'notas_fiscais', eventType, operacao, (n) =>
+            n ? { id: n.id } : null,
+        );
+    }
 
     @Post('parse-qr')
     @Roles('admin')
@@ -26,7 +47,7 @@ export class ExpensesController {
     @ApiOperation({ summary: 'Registrar uma nova despesa' })
     @ApiResponse({ status: 201, description: 'Despesa registrada com sucesso' })
     create(@Body() createExpenseDto: CreateExpenseDto) {
-        return this.expensesService.create(createExpenseDto);
+        return this.comBroadcast('INSERT', this.expensesService.create(createExpenseDto));
     }
 
     @Get()
@@ -62,7 +83,7 @@ export class ExpensesController {
     @ApiOperation({ summary: 'Atualizar uma despesa registrada' })
     @ApiResponse({ status: 200, description: 'Despesa atualizada com sucesso' })
     update(@Param('id', ParseIntPipe) id: number, @Body() updateExpenseDto: CreateExpenseDto) {
-        return this.expensesService.update(id, updateExpenseDto);
+        return this.comBroadcast('UPDATE', this.expensesService.update(id, updateExpenseDto));
     }
 
     @Delete(':id')
@@ -70,6 +91,6 @@ export class ExpensesController {
     @ApiOperation({ summary: 'Excluir um registro de despesa' })
     @ApiResponse({ status: 200, description: 'Despesa excluída com sucesso' })
     remove(@Param('id', ParseIntPipe) id: number) {
-        return this.expensesService.delete(id);
+        return this.comBroadcast('DELETE', this.expensesService.delete(id));
     }
 }

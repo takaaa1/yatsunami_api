@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const mockUser = {
   id: 'uuid-1',
@@ -27,7 +28,10 @@ describe('UsersController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController],
-      providers: [{ provide: UsersService, useValue: mockUsersService }],
+      providers: [
+        { provide: UsersService, useValue: mockUsersService },
+        { provide: RealtimeGateway, useValue: { broadcast: jest.fn() } },
+      ],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);

@@ -7,6 +7,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -19,27 +20,18 @@ export class OrdersController {
     ) { }
 
     /**
-     * Executa a mutação e, **só se ela concluir**, avisa as telas que exibem o
-     * pedido.
-     *
-     * Fica no controlador porque cada endpoint tem uma saída só — os métodos do
-     * serviço têm vários `return`, e emitir em cada um seria fácil de esquecer
-     * ao mexer depois. O `delivery.controller.ts` já emite deste mesmo lugar.
-     *
-     * `dataEncomendaId` vai junto porque a lista do formulário
+     * `dataEncomendaId` vai no evento porque a lista do formulário
      * (`(admin)/order-forms/orders.tsx`) filtra por ele; sem o campo, toda tela
      * de formulário aberta refaz a busca a cada evento de qualquer formulário.
      */
-    private async comBroadcast<
+    private comBroadcast<
         T extends { id: number; dataEncomendaId?: number | null; statusPagamento?: string | null },
-    >(eventType: 'INSERT' | 'UPDATE', operacao: Promise<T>): Promise<T> {
-        const pedido = await operacao;
-        this.realtimeGateway.broadcast('pedidos_encomenda', eventType, {
-            id: pedido.id,
-            dataEncomendaId: pedido.dataEncomendaId ?? null,
-            statusPagamento: pedido.statusPagamento ?? null,
-        });
-        return pedido;
+    >(eventType: BroadcastEventType, operacao: Promise<T>): Promise<T> {
+        return broadcastAfter(this.realtimeGateway, 'pedidos_encomenda', eventType, operacao, (p) => ({
+            id: p.id,
+            dataEncomendaId: p.dataEncomendaId ?? null,
+            statusPagamento: p.statusPagamento ?? null,
+        }));
     }
 
     @Post()

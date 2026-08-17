@@ -24,13 +24,34 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserFilterDto } from './dto/user-filter.dto';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
 
 @ApiTags('Users')
 @Controller('users')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @ApiBearerAuth('JWT')
 export class UsersController {
-    constructor(private readonly usersService: UsersService) { }
+    constructor(
+        private readonly usersService: UsersService,
+        private readonly realtimeGateway: RealtimeGateway,
+    ) { }
+
+    /**
+     * `id` é uuid aqui, não inteiro — a lista de usuários do admin o compara
+     * como texto.
+     *
+     * `remove` é exclusão lógica (marca o e-mail com o sufixo de excluído), por
+     * isso sai como `UPDATE` e não como `DELETE`.
+     */
+    private comBroadcast<T extends { id: string }>(
+        eventType: BroadcastEventType,
+        operacao: Promise<T>,
+    ): Promise<T> {
+        return broadcastAfter(this.realtimeGateway, 'usuarios', eventType, operacao, (u) => ({
+            id: u.id,
+        }));
+    }
 
     @Get()
     @Roles('admin')
@@ -56,7 +77,7 @@ export class UsersController {
     @ApiResponse({ status: 200, description: 'Usuário atualizado' })
     @ApiResponse({ status: 404, description: 'Usuário não encontrado' })
     async update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-        return this.usersService.update(id, dto);
+        return this.comBroadcast('UPDATE', this.usersService.update(id, dto));
     }
 
     @Post(':id/activate')
@@ -65,7 +86,7 @@ export class UsersController {
     @ApiOperation({ summary: 'Ativar usuário' })
     @ApiResponse({ status: 200, description: 'Usuário ativado' })
     async activate(@Param('id') id: string) {
-        return this.usersService.activate(id);
+        return this.comBroadcast('UPDATE', this.usersService.activate(id));
     }
 
     @Post(':id/deactivate')
@@ -75,7 +96,7 @@ export class UsersController {
     @ApiResponse({ status: 200, description: 'Usuário desativado' })
     @ApiResponse({ status: 403, description: 'Não é possível desativar a própria conta' })
     async deactivate(@Param('id') id: string, @CurrentUser('id') currentUserId: string) {
-        return this.usersService.deactivate(id, currentUserId);
+        return this.comBroadcast('UPDATE', this.usersService.deactivate(id, currentUserId));
     }
 
     @Delete(':id')
@@ -85,6 +106,14 @@ export class UsersController {
     @ApiResponse({ status: 204, description: 'Usuário excluído' })
     @ApiResponse({ status: 403, description: 'Não é possível excluir a própria conta' })
     async remove(@Param('id') id: string, @CurrentUser('id') currentUserId: string) {
-        return this.usersService.remove(id, currentUserId);
+        // `remove` não devolve nada — o id vem da rota. É exclusão lógica
+        // (marca o e-mail com o sufixo de excluído), daí `UPDATE`.
+        return broadcastAfter(
+            this.realtimeGateway,
+            'usuarios',
+            'UPDATE',
+            this.usersService.remove(id, currentUserId),
+            () => ({ id }),
+        );
     }
 }

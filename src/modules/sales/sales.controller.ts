@@ -7,6 +7,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 import { PdfService } from '../pdf/pdf.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
 
 @ApiTags('Sales')
 @Controller('sales')
@@ -16,14 +18,25 @@ export class SalesController {
     constructor(
         private readonly salesService: SalesService,
         private readonly pdfService: PdfService,
+        private readonly realtimeGateway: RealtimeGateway,
     ) { }
+
+    /** Venda entra na lista do admin e no faturamento do dashboard. */
+    private comBroadcast<T extends { id: number }>(
+        eventType: BroadcastEventType,
+        operacao: Promise<T>,
+    ): Promise<T> {
+        return broadcastAfter(this.realtimeGateway, 'vendas', eventType, operacao, (v) => ({
+            id: v.id,
+        }));
+    }
 
     @Post()
     @Roles('admin')
     @ApiOperation({ summary: 'Registrar uma nova venda (PDV)' })
     @ApiResponse({ status: 201, description: 'Venda registrada com sucesso' })
     create(@CurrentUser('id') creatorId: string, @Body() createSaleDto: CreateSaleDto) {
-        return this.salesService.create(creatorId, createSaleDto);
+        return this.comBroadcast('INSERT', this.salesService.create(creatorId, createSaleDto));
     }
 
     @Get()
@@ -73,6 +86,6 @@ export class SalesController {
     @ApiResponse({ status: 200, description: 'Venda excluída com sucesso' })
     @ApiResponse({ status: 404, description: 'Venda não encontrada' })
     remove(@Param('id', ParseIntPipe) id: number) {
-        return this.salesService.delete(id);
+        return this.comBroadcast('DELETE', this.salesService.delete(id));
     }
 }

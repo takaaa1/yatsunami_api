@@ -10,6 +10,7 @@ import { PdfService } from '../pdf/pdf.service';
 import { BackgroundJobService } from '../../common/jobs/background-job.service';
 import { PdfJobResult } from '../../common/jobs/background-job.types';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { broadcastAfter, type BroadcastEventType } from '../../common/realtime/broadcast-after';
 
 @ApiTags('order-forms')
 @ApiTags('order-forms')
@@ -23,26 +24,21 @@ export class OrderFormsController {
     ) { }
 
     /**
-     * Executa a mutação e, **só se ela concluir**, avisa as telas que listam
-     * formulários.
-     *
      * O que mais importa aqui é ativar ou desativar: o admin abre o formulário
      * e os clientes precisam ver "Novo Pedido" liberado sem reabrir o app.
      *
-     * `ativo` e `concluido` vão junto porque decidem se o formulário aparece
-     * para o cliente — quem escuta pode reagir sem refazer a busca à toa.
+     * `ativo` e `concluido` vão no evento porque decidem se o formulário
+     * aparece para o cliente — quem escuta pode reagir sem refazer a busca.
      */
-    private async comBroadcast<T extends { id: number; ativo?: boolean; concluido?: boolean }>(
-        eventType: 'INSERT' | 'UPDATE' | 'DELETE',
+    private comBroadcast<T extends { id: number; ativo?: boolean; concluido?: boolean }>(
+        eventType: BroadcastEventType,
         operacao: Promise<T>,
     ): Promise<T> {
-        const formulario = await operacao;
-        this.realtimeGateway.broadcast('datas_encomenda', eventType, {
-            id: formulario.id,
-            ativo: formulario.ativo ?? null,
-            concluido: formulario.concluido ?? null,
-        });
-        return formulario;
+        return broadcastAfter(this.realtimeGateway, 'datas_encomenda', eventType, operacao, (f) => ({
+            id: f.id,
+            ativo: f.ativo ?? null,
+            concluido: f.concluido ?? null,
+        }));
     }
 
     @Post()
