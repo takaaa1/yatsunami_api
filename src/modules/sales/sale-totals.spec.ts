@@ -286,7 +286,7 @@ describe('conferirDescontos', () => {
       ]);
 
       expect(p).toEqual([
-        { escopo: 'item', indice: 0, valor: '12', limite: '10' },
+        { escopo: 'item', tipo: 'fixed', indice: 0, valor: '12', limite: '10' },
       ]);
     });
 
@@ -301,21 +301,65 @@ describe('conferirDescontos', () => {
       ]);
 
       expect(p).toEqual([
-        { escopo: 'item', indice: 1, valor: '50', limite: '10' },
+        { escopo: 'item', tipo: 'fixed', indice: 1, valor: '50', limite: '10' },
       ]);
     });
 
-    /** Percentual tem outra regra e não entra aqui. */
-    it('não olha desconto percentual', () => {
+    /** Percentual tem outro limite — cem por cento — e ele também vale. */
+    it('aceita percentual até cem', () => {
       const p = conferirDescontos([
         item({
           precoUnitario: 10,
           tipoDesconto: DiscountType.PERCENTAGE,
-          valorDesconto: 90,
+          valorDesconto: 100,
         }),
       ]);
 
       expect(p).toEqual([]);
+    });
+
+    it('recusa percentual acima de cem', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.PERCENTAGE,
+          valorDesconto: 120,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        {
+          escopo: 'item',
+          tipo: 'percentage',
+          indice: 0,
+          valor: '120',
+          limite: '100',
+        },
+      ]);
+    });
+
+    /**
+     * O limite do percentual **não** depende do preço: 120% de um item de R$ 1
+     * é tão inválido quanto de um item de R$ 1.000.
+     */
+    it('o limite do percentual não olha o preço do item', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 1000,
+          tipoDesconto: DiscountType.PERCENTAGE,
+          valorDesconto: 101,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        {
+          escopo: 'item',
+          tipo: 'percentage',
+          indice: 0,
+          valor: '101',
+          limite: '100',
+        },
+      ]);
     });
   });
 
@@ -335,7 +379,9 @@ describe('conferirDescontos', () => {
         descontoGeralValor: 150,
       });
 
-      expect(p).toEqual([{ escopo: 'geral', valor: '150', limite: '100' }]);
+      expect(p).toEqual([
+        { escopo: 'geral', tipo: 'fixed', valor: '150', limite: '100' },
+      ]);
     });
 
     /**
@@ -357,7 +403,9 @@ describe('conferirDescontos', () => {
       );
 
       // 2 × 90 = 180, então 190 não cabe — mesmo sendo menor que os 200 cheios.
-      expect(p).toEqual([{ escopo: 'geral', valor: '190', limite: '180' }]);
+      expect(p).toEqual([
+        { escopo: 'geral', tipo: 'fixed', valor: '190', limite: '180' },
+      ]);
     });
 
     it('a taxa de entrega não aumenta o limite', () => {
@@ -367,13 +415,36 @@ describe('conferirDescontos', () => {
         taxaEntrega: 20,
       });
 
-      expect(p).toEqual([{ escopo: 'geral', valor: '105', limite: '100' }]);
+      expect(p).toEqual([
+        { escopo: 'geral', tipo: 'fixed', valor: '105', limite: '100' },
+      ]);
     });
 
-    it('não olha desconto percentual', () => {
+    it('aceita percentual até cem', () => {
       const p = conferirDescontos([item({ precoUnitario: 10 })], {
         descontoGeralTipo: DiscountType.PERCENTAGE,
         descontoGeralValor: 100,
+      });
+
+      expect(p).toEqual([]);
+    });
+
+    it('recusa percentual acima de cem', () => {
+      const p = conferirDescontos([item({ precoUnitario: 10 })], {
+        descontoGeralTipo: DiscountType.PERCENTAGE,
+        descontoGeralValor: 150,
+      });
+
+      expect(p).toEqual([
+        { escopo: 'geral', tipo: 'percentage', valor: '150', limite: '100' },
+      ]);
+    });
+
+    /** Venda vazia: cem por cento de nada continua sendo cem por cento. */
+    it('percentual válido não depende de haver item', () => {
+      const p = conferirDescontos([], {
+        descontoGeralTipo: DiscountType.PERCENTAGE,
+        descontoGeralValor: 50,
       });
 
       expect(p).toEqual([]);
@@ -398,8 +469,8 @@ describe('conferirDescontos', () => {
 
     // O item some inteiro, então sobra zero para o desconto geral incidir.
     expect(p).toEqual([
-      { escopo: 'item', indice: 0, valor: '50', limite: '10' },
-      { escopo: 'geral', valor: '5', limite: '0' },
+      { escopo: 'item', tipo: 'fixed', indice: 0, valor: '50', limite: '10' },
+      { escopo: 'geral', tipo: 'fixed', valor: '5', limite: '0' },
     ]);
   });
 });

@@ -130,9 +130,11 @@ export function resumirVenda(
   };
 }
 
-/** Um desconto fixo que passa do que ele desconta. */
+/** Um desconto que passa do limite do seu tipo. */
 export interface ProblemaDeDesconto {
   escopo: 'item' | 'geral';
+  /** Decide a unidade da mensagem: reais para `fixed`, por cento para `percentage`. */
+  tipo: 'fixed' | 'percentage';
   /** Posição do item na lista; ausente no desconto geral. */
   indice?: number;
   /** O que foi pedido, como texto — `Decimal` não compara bem em teste. */
@@ -142,52 +144,73 @@ export interface ProblemaDeDesconto {
 }
 
 /**
- * Confere se os descontos **fixos** cabem no que descontam.
+ * Confere se os descontos cabem no que descontam.
  *
  * O corte em zero de `resumirVenda` continua existindo como defesa, mas ele
  * apagava o excesso **em silêncio**: quem digitasse R$ 50 num item de R$ 10 via
  * a venda sair com o item zerado, e nada dizia que os outros R$ 40 sumiram.
  *
- * Duas regras, ambas so para `fixed`:
+ * Cada tipo tem o seu limite, e a diferença importa:
  *
- * - item: o limite é o preço **da unidade**, porque o desconto fixo é por unidade;
- * - geral: o limite é o total **já descontado item a item**, que é sobre o que
- *   ele incide. A taxa de entrega não entra: ela é somada depois, e não está
- *   sendo descontada.
- *
- * Percentual segue por outro caminho e não é conferido aqui.
+ * - **fixo, item**: o preço da **unidade**, porque o desconto fixo é por unidade;
+ * - **fixo, geral**: o total **já descontado item a item**, que é sobre o que ele
+ *   incide. A taxa de entrega não entra: ela é somada depois, e não está sendo
+ *   descontada;
+ * - **percentual**, nos dois escopos: **cem**. Este limite não olha preço nenhum —
+ *   120% de um item de R$ 1 é tão inválido quanto de um item de R$ 1.000.
  */
 export function conferirDescontos(
   itens: LinhaDeVenda[],
   ajustes: AjustesDaVenda = {},
 ): ProblemaDeDesconto[] {
   const problemas: ProblemaDeDesconto[] = [];
+  const CEM = new Prisma.Decimal(100);
 
   itens.forEach((linha, indice) => {
-    if (linha.tipoDesconto !== FIXO) return;
-    const preco = dec(linha.precoUnitario);
     const desconto = dec(linha.valorDesconto);
-    if (desconto.gt(preco)) {
+
+    if (linha.tipoDesconto === FIXO) {
+      const preco = dec(linha.precoUnitario);
+      if (desconto.gt(preco)) {
+        problemas.push({
+          escopo: 'item',
+          tipo: 'fixed',
+          indice,
+          valor: desconto.toString(),
+          limite: preco.toString(),
+        });
+      }
+    } else if (linha.tipoDesconto === PERCENTUAL && desconto.gt(CEM)) {
       problemas.push({
         escopo: 'item',
+        tipo: 'percentage',
         indice,
         valor: desconto.toString(),
-        limite: preco.toString(),
+        limite: '100',
       });
     }
   });
 
+  const geral = dec(ajustes.descontoGeralValor);
+
   if (ajustes.descontoGeralTipo === FIXO) {
-    const desconto = dec(ajustes.descontoGeralValor);
     const { subtotal, descontoItens } = resumirVenda(itens);
     const limite = subtotal.sub(descontoItens);
-    if (desconto.gt(limite)) {
+    if (geral.gt(limite)) {
       problemas.push({
         escopo: 'geral',
-        valor: desconto.toString(),
+        tipo: 'fixed',
+        valor: geral.toString(),
         limite: limite.toString(),
       });
     }
+  } else if (ajustes.descontoGeralTipo === PERCENTUAL && geral.gt(CEM)) {
+    problemas.push({
+      escopo: 'geral',
+      tipo: 'percentage',
+      valor: geral.toString(),
+      limite: '100',
+    });
   }
 
   return problemas;

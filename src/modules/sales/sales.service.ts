@@ -4,7 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { resumirVenda, conferirDescontos } from './sale-totals';
+import {
+  resumirVenda,
+  conferirDescontos,
+  type ProblemaDeDesconto,
+} from './sale-totals';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { Prisma } from '@prisma/client';
 
@@ -13,7 +17,7 @@ export class SalesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Desconto fixo não pode passar do que ele desconta.
+   * Desconto não pode passar do limite do seu tipo.
    *
    * Recusar aqui, antes da transação, é o que impede uma venda meio-criada. O
    * corte em zero de `resumirVenda` continua existindo como defesa, mas deixa
@@ -27,11 +31,19 @@ export class SalesService {
     });
     if (problemas.length === 0) return;
 
-    const reais = (v: string) => `R$ ${Number(v).toFixed(2)}`;
+    // A unidade segue o tipo: reais para o fixo, por cento para o percentual.
+    const medida = (p: ProblemaDeDesconto, v: string) =>
+      p.tipo === 'fixed' ? `R$ ${Number(v).toFixed(2)}` : `${Number(v)}%`;
+    const teto = (p: ProblemaDeDesconto) =>
+      p.tipo === 'percentage'
+        ? '100%'
+        : p.escopo === 'item'
+          ? `o preço unitário (${medida(p, p.limite)})`
+          : `o total dos itens (${medida(p, p.limite)})`;
     const mensagens = problemas.map((p) =>
       p.escopo === 'item'
-        ? `Desconto do item ${(p.indice ?? 0) + 1} (${reais(p.valor)}) maior que o preço unitário (${reais(p.limite)})`
-        : `Desconto geral (${reais(p.valor)}) maior que o total dos itens (${reais(p.limite)})`,
+        ? `Desconto do item ${(p.indice ?? 0) + 1} (${medida(p, p.valor)}) maior que ${teto(p)}`
+        : `Desconto geral (${medida(p, p.valor)}) maior que ${teto(p)}`,
     );
     throw new BadRequestException(mensagens.join('; '));
   }

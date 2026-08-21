@@ -299,6 +299,46 @@ describe('SalesService.create', () => {
       ).rejects.toThrow(/item 2/);
     });
 
+    it('recusa percentual de item acima de cem', async () => {
+      await expect(
+        venda([
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.PERCENTAGE,
+            valorDesconto: 120,
+          }),
+        ]),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('recusa percentual geral acima de cem', async () => {
+      await expect(
+        venda([item({ precoUnitario: 10 })], {
+          descontoGeralTipo: DiscountType.PERCENTAGE,
+          descontoGeralValor: 150,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    /** A unidade da mensagem segue o tipo: por cento, não reais. */
+    it('a mensagem do percentual fala em por cento', async () => {
+      await expect(
+        venda([item({ precoUnitario: 10 })], {
+          descontoGeralTipo: DiscountType.PERCENTAGE,
+          descontoGeralValor: 150,
+        }),
+      ).rejects.toThrow(/150%.*100%/);
+    });
+
+    it('cem por cento passa', async () => {
+      await expect(
+        venda([item({ precoUnitario: 10 })], {
+          descontoGeralTipo: DiscountType.PERCENTAGE,
+          descontoGeralValor: 100,
+        }),
+      ).resolves.toBeTruthy();
+    });
+
     it('desconto igual ao limite passa', async () => {
       await expect(
         venda([
