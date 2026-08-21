@@ -164,3 +164,59 @@ describe('PdfService — o recibo fecha', () => {
     expect(somaDasLinhas()).toBeCloseTo(8, 2);
   });
 });
+
+/**
+ * O gerador de verdade, sem substituto no meio.
+ *
+ * Os casos acima interceptam `generatePdf` para ler a definição do documento —
+ * e por isso **não exercitam o pdfmake**. Foi essa a lacuna que deixou passar o
+ * `pdfDoc.on is not a function`: no pdfmake 0.3, `createPdfKitDocument` devolve
+ * uma **Promise**, não o stream, e o `.on` era chamado na promessa.
+ *
+ * Nenhum teste de unidade pegaria isso enquanto o printer estivesse dublado. A
+ * lição: quando a costura que se dubla é justamente a fronteira com a
+ * biblioteca, **um caso tem de atravessá-la**.
+ */
+describe('PdfService.generatePdf — atravessa o pdfmake', () => {
+  it('produz um PDF de verdade', async () => {
+    const service = new PdfService();
+
+    const buffer = await service.generatePdf({ content: ['teste'] });
+
+    expect(Buffer.isBuffer(buffer)).toBe(true);
+    expect(buffer.length).toBeGreaterThan(0);
+    // Todo PDF começa com esta assinatura.
+    expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
+  }, 20000);
+
+  it('o recibo de venda chega a virar arquivo', async () => {
+    const service = new PdfService();
+
+    const buffer = await service.generateSaleReceipt(
+      venda({
+        itens: [item({ precoUnitario: 40 })],
+        taxaEntrega: 8,
+        total: 48,
+      }),
+    );
+
+    expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
+  }, 20000);
+
+  /** Outro documento, outra definição — e o mesmo caminho até o pdfmake. */
+  it('o resumo de encomendas também vira arquivo', async () => {
+    const service = new PdfService();
+
+    const buffer = await service.generateOrderSummary({
+      date: '2026-08-21T12:00:00.000Z',
+      orders: [
+        {
+          usuario: { nome: 'Fulano' },
+          itens: [item({ quantidade: 2 }), item({ precoUnitario: 25 })],
+        },
+      ],
+    });
+
+    expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
+  }, 20000);
+});

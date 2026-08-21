@@ -18,9 +18,16 @@ import type {
 
 /** Recorte do `Printer` do pdfmake — @types/pdfmake só cobre a API de browser. */
 interface PdfPrinterLike {
-  createPdfKitDocument(doc: TDocumentDefinitions): NodeJS.ReadableStream & {
-    end(): void;
-  };
+  /**
+   * Devolve **promessa** do stream, não o stream.
+   *
+   * Mudou no pdfmake 0.3: até a 0.2 o retorno era síncrono. Sem o `await`, o
+   * `.on('data')` era chamado na própria promessa e todo endpoint de PDF
+   * respondia 500 com `pdfDoc.on is not a function`.
+   */
+  createPdfKitDocument(
+    doc: TDocumentDefinitions,
+  ): Promise<NodeJS.ReadableStream & { end(): void }>;
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- pdfmake não expõe tipos/ESM para este caminho interno
 const PdfPrinter = (require('pdfmake/js/Printer') as { default: unknown })
@@ -57,7 +64,7 @@ export class PdfService {
 
   async generatePdf(docDefinition: TDocumentDefinitions): Promise<Buffer> {
     try {
-      const pdfDoc = this.printer.createPdfKitDocument(docDefinition);
+      const pdfDoc = await this.printer.createPdfKitDocument(docDefinition);
       return new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
         pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk));
