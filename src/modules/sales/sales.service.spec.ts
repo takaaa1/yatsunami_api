@@ -339,6 +339,19 @@ describe('SalesService.create', () => {
       ).resolves.toBeTruthy();
     });
 
+    /** Negativo é acréscimo disfarçado, e a mensagem diz isso. */
+    it('recusa desconto negativo, com frase própria', async () => {
+      await expect(
+        venda([
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.FIXED,
+            valorDesconto: -5,
+          }),
+        ]),
+      ).rejects.toThrow(/não pode ser negativo/);
+    });
+
     it('desconto igual ao limite passa', async () => {
       await expect(
         venda([

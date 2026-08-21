@@ -40,10 +40,16 @@ export class SalesService {
         : p.escopo === 'item'
           ? `o preço unitário (${medida(p, p.limite)})`
           : `o total dos itens (${medida(p, p.limite)})`;
-    const mensagens = problemas.map((p) =>
+    const alvo = (p: ProblemaDeDesconto) =>
       p.escopo === 'item'
-        ? `Desconto do item ${(p.indice ?? 0) + 1} (${medida(p, p.valor)}) maior que ${teto(p)}`
-        : `Desconto geral (${medida(p, p.valor)}) maior que ${teto(p)}`,
+        ? `Desconto do item ${(p.indice ?? 0) + 1}`
+        : 'Desconto geral';
+    const mensagens = problemas.map((p) =>
+      // Negativo tem frase própria: dizer que ele "passa" de zero seria descrever
+      // um acréscimo como se fosse um desconto grande demais.
+      Number(p.valor) < 0
+        ? `${alvo(p)} não pode ser negativo`
+        : `${alvo(p)} (${medida(p, p.valor)}) maior que ${teto(p)}`,
     );
     throw new BadRequestException(mensagens.join('; '));
   }

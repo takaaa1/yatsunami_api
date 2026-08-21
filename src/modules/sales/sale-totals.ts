@@ -158,6 +158,11 @@ export interface ProblemaDeDesconto {
  *   descontada;
  * - **percentual**, nos dois escopos: **cem**. Este limite não olha preço nenhum —
  *   120% de um item de R$ 1 é tão inválido quanto de um item de R$ 1.000.
+ *
+ * E um piso, para os dois tipos e os dois escopos: **zero**. Desconto negativo é
+ * acréscimo disfarçado — `resumirVenda` somaria, porque subtrair um negativo
+ * aumenta, e o corte em zero só olha o piso do total. A venda sairia mais cara
+ * que os itens, com um campo chamado "desconto" explicando por quê.
  */
 export function conferirDescontos(
   itens: LinhaDeVenda[],
@@ -168,22 +173,38 @@ export function conferirDescontos(
 
   itens.forEach((linha, indice) => {
     const desconto = dec(linha.valorDesconto);
+    const tipo = linha.tipoDesconto === PERCENTUAL ? 'percentage' : 'fixed';
+    if (linha.tipoDesconto !== FIXO && linha.tipoDesconto !== PERCENTUAL)
+      return;
 
-    if (linha.tipoDesconto === FIXO) {
+    // O piso vem primeiro: um valor negativo já está errado, e dizer também que
+    // ele "passa do limite" seria dois problemas para o mesmo campo.
+    if (desconto.lt(0)) {
+      problemas.push({
+        escopo: 'item',
+        tipo,
+        indice,
+        valor: desconto.toString(),
+        limite: '0',
+      });
+      return;
+    }
+
+    if (tipo === 'fixed') {
       const preco = dec(linha.precoUnitario);
       if (desconto.gt(preco)) {
         problemas.push({
           escopo: 'item',
-          tipo: 'fixed',
+          tipo,
           indice,
           valor: desconto.toString(),
           limite: preco.toString(),
         });
       }
-    } else if (linha.tipoDesconto === PERCENTUAL && desconto.gt(CEM)) {
+    } else if (desconto.gt(CEM)) {
       problemas.push({
         escopo: 'item',
-        tipo: 'percentage',
+        tipo,
         indice,
         valor: desconto.toString(),
         limite: '100',
@@ -193,24 +214,39 @@ export function conferirDescontos(
 
   const geral = dec(ajustes.descontoGeralValor);
 
-  if (ajustes.descontoGeralTipo === FIXO) {
-    const { subtotal, descontoItens } = resumirVenda(itens);
-    const limite = subtotal.sub(descontoItens);
-    if (geral.gt(limite)) {
+  const tipoGeral =
+    ajustes.descontoGeralTipo === PERCENTUAL ? 'percentage' : 'fixed';
+
+  if (
+    ajustes.descontoGeralTipo === FIXO ||
+    ajustes.descontoGeralTipo === PERCENTUAL
+  ) {
+    if (geral.lt(0)) {
       problemas.push({
         escopo: 'geral',
-        tipo: 'fixed',
+        tipo: tipoGeral,
         valor: geral.toString(),
-        limite: limite.toString(),
+        limite: '0',
+      });
+    } else if (tipoGeral === 'fixed') {
+      const { subtotal, descontoItens } = resumirVenda(itens);
+      const limite = subtotal.sub(descontoItens);
+      if (geral.gt(limite)) {
+        problemas.push({
+          escopo: 'geral',
+          tipo: tipoGeral,
+          valor: geral.toString(),
+          limite: limite.toString(),
+        });
+      }
+    } else if (geral.gt(CEM)) {
+      problemas.push({
+        escopo: 'geral',
+        tipo: tipoGeral,
+        valor: geral.toString(),
+        limite: '100',
       });
     }
-  } else if (ajustes.descontoGeralTipo === PERCENTUAL && geral.gt(CEM)) {
-    problemas.push({
-      escopo: 'geral',
-      tipo: 'percentage',
-      valor: geral.toString(),
-      limite: '100',
-    });
   }
 
   return problemas;

@@ -455,6 +455,84 @@ describe('conferirDescontos', () => {
     expect(conferirDescontos([item()])).toEqual([]);
   });
 
+  /**
+   * Desconto negativo é acréscimo disfarçado.
+   *
+   * `resumirVenda` somaria: subtrair um número negativo aumenta o total. Como o
+   * corte em zero só olha o piso, nada nunca acusaria — a venda sairia mais cara
+   * do que os itens, com um campo chamado "desconto" explicando por quê.
+   */
+  describe('desconto negativo', () => {
+    it('recusa valor negativo no item', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: -5,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        { escopo: 'item', tipo: 'fixed', indice: 0, valor: '-5', limite: '0' },
+      ]);
+    });
+
+    it('recusa percentual negativo no item', () => {
+      const p = conferirDescontos([
+        item({
+          tipoDesconto: DiscountType.PERCENTAGE,
+          valorDesconto: -10,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        {
+          escopo: 'item',
+          tipo: 'percentage',
+          indice: 0,
+          valor: '-10',
+          limite: '0',
+        },
+      ]);
+    });
+
+    it('recusa valor negativo no desconto geral', () => {
+      const p = conferirDescontos([item({ precoUnitario: 10 })], {
+        descontoGeralTipo: DiscountType.FIXED,
+        descontoGeralValor: -20,
+      });
+
+      expect(p).toEqual([
+        { escopo: 'geral', tipo: 'fixed', valor: '-20', limite: '0' },
+      ]);
+    });
+
+    it('zero continua valendo como ausência de desconto', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 0,
+        }),
+      ]);
+
+      expect(p).toEqual([]);
+    });
+
+    /** Um problema por desconto: negativo não é "acima do limite" também. */
+    it('acusa uma vez só', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: -5,
+        }),
+      ]);
+
+      expect(p).toHaveLength(1);
+    });
+  });
+
   it('acusa os dois escopos de uma vez', () => {
     const p = conferirDescontos(
       [
