@@ -125,21 +125,28 @@ export class ProductsService {
             } : undefined
         };
 
-        // Handle variety image cleanup
-        const oldVarietyImages = product.variedades
-            .map(v => v.imagem)
-            .filter((img): img is string => img != null && img !== '');
+        // Limpeza das imagens de variedade — **só quando a lista veio no corpo**.
+        //
+        // O endpoint é `@Patch` e o DTO é `PartialType`, então mandar um campo
+        // só é o uso anunciado. Sem esta guarda, um `PATCH { ativo: false }`
+        // comparava as imagens antigas contra uma lista nova vazia e apagava
+        // **todas** do armazenamento — enquanto as variedades continuavam no
+        // banco, porque `data.variedades` fica `undefined` e elas não são
+        // recriadas. O resultado era o banco apontando para arquivos que não
+        // existem mais.
+        if (variedades) {
+            const oldVarietyImages = product.variedades
+                .map(v => v.imagem)
+                .filter((img): img is string => img != null && img !== '');
 
-        const newVarietyImages = variedades
-            ? variedades
-                  .map(v => v.imagem)
-                  .filter((img): img is string => img != null && img !== '')
-            : [];
+            const newVarietyImages = variedades
+                .map(v => v.imagem)
+                .filter((img): img is string => img != null && img !== '');
 
-        // Delete images that are no longer in the new varieties list
-        for (const oldImg of oldVarietyImages) {
-            if (!newVarietyImages.includes(oldImg)) {
-                await this.deleteOldImage(oldImg);
+            for (const oldImg of oldVarietyImages) {
+                if (!newVarietyImages.includes(oldImg)) {
+                    await this.deleteOldImage(oldImg);
+                }
             }
         }
 
