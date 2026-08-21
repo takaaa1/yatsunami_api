@@ -1,3 +1,8 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -15,9 +20,13 @@ describe('OrdersService (perf Fase 2)', () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       create: jest.fn(),
     },
+    dataEncomenda: { findUnique: jest.fn() },
+    usuario: { findUnique: jest.fn() },
+    produto: { findUnique: jest.fn() },
   };
 
   beforeEach(async () => {
@@ -48,6 +57,156 @@ describe('OrdersService (perf Fase 2)', () => {
 
     service = module.get<OrdersService>(OrdersService);
     jest.clearAllMocks();
+  });
+
+  /**
+   * Regras de janela, propriedade e duplicidade.
+   *
+   * Auditadas e **corretas** — o motivo destes casos não é consertar nada, é
+   * que elas não tinham teste nenhum. O spec existente cobria só desempenho
+   * (consultas em lote), e estas são as regras cuja falha custa mais caro:
+   * aceitar pedido fora do prazo, ou entregar o pedido de um usuário a outro.
+   */
+  describe('regras de negócio da criação', () => {
+    const emHoras = (n: number) => new Date(Date.now() + n * 3600_000);
+
+    const janela = (extra: Record<string, unknown> = {}) => ({
+      id: 7,
+      ativo: true,
+      concluido: false,
+      dataInicioPedido: emHoras(-24),
+      dataLimitePedido: emHoras(24),
+      ...extra,
+    });
+
+    const pedido = () => ({
+      dataEncomendaId: 7,
+      itens: [{ produtoId: 1, quantidade: 1 }],
+    });
+
+    beforeEach(() => {
+      mockPrisma.pedidoEncomenda.findFirst.mockResolvedValue(null);
+    });
+
+    it('recusa quando a data de encomenda não existe', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(null);
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('recusa quando a data foi desativada', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(
+        janela({ ativo: false }),
+      );
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa depois do prazo', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(
+        janela({ dataLimitePedido: emHoras(-1) }),
+      );
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa antes da abertura', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(
+        janela({ dataInicioPedido: emHoras(1) }),
+      );
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('recusa segundo pedido do mesmo usuário para a mesma data', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(janela());
+      mockPrisma.pedidoEncomenda.findFirst.mockResolvedValue({
+        id: 99,
+        statusPagamento: 'pendente',
+      });
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('deixa criar de novo quando o pedido anterior foi cancelado', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(janela());
+      mockPrisma.pedidoEncomenda.findFirst.mockResolvedValue({
+        id: 99,
+        statusPagamento: 'cancelado',
+      });
+      mockPrisma.produto.findUnique.mockResolvedValue(null);
+
+      // Passou das guardas e tropeçou no produto inexistente, que é o passo
+      // seguinte. É assim que se prova que a guarda **não** barrou, sem ter de
+      // dublar a criação inteira.
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockPrisma.produto.findUnique).toHaveBeenCalled();
+    });
+
+    it('dentro da janela, segue para a verificação dos produtos', async () => {
+      mockPrisma.dataEncomenda.findUnique.mockResolvedValue(janela());
+      mockPrisma.produto.findUnique.mockResolvedValue(null);
+
+      await expect(service.create('user-1', pedido() as never)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockPrisma.produto.findUnique).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Propriedade do pedido. O não-dono recebe **`NotFoundException`**, não
+   * `Forbidden`: o comentário do serviço diz o porquê — não vazar a existência
+   * do recurso. O caso abaixo trava essa escolha, que é fácil de "corrigir"
+   * para Forbidden sem perceber que era deliberada.
+   */
+  describe('propriedade do pedido', () => {
+    const doOutro = {
+      id: 5,
+      usuarioId: 'dono',
+      statusPagamento: 'pendente',
+      dataEncomenda: { dataLimitePedido: new Date(Date.now() + 3600_000) },
+      itens: [],
+      usuario: {},
+    };
+
+    it('o dono vê o próprio pedido', async () => {
+      mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(doOutro);
+
+      await expect(service.findOne(5, 'dono')).resolves.toBeTruthy();
+      expect(mockPrisma.usuario.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('estranho não vê, e a resposta não revela que o pedido existe', async () => {
+      mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(doOutro);
+      mockPrisma.usuario.findUnique.mockResolvedValue({ role: 'cliente' });
+
+      await expect(service.findOne(5, 'intruso')).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.findOne(5, 'intruso')).rejects.not.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('admin vê pedido de terceiro', async () => {
+      mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(doOutro);
+      mockPrisma.usuario.findUnique.mockResolvedValue({ role: 'admin' });
+
+      await expect(service.findOne(5, 'admin-1')).resolves.toBeTruthy();
+    });
   });
 
   describe('findAll', () => {
