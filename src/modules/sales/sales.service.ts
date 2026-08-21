@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateSaleDto, DiscountType } from './dto/create-sale.dto';
+import { resumirVenda } from './sale-totals';
+import { CreateSaleDto } from './dto/create-sale.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -19,8 +20,6 @@ export class SalesService {
     } = createSaleDto;
 
     return this.prisma.$transaction(async (tx) => {
-      let totalVenda = new Prisma.Decimal(0);
-
       // Create the Sale record first to get an ID
       const venda = await tx.venda.create({
         data: {
@@ -47,7 +46,6 @@ export class SalesService {
           );
         }
 
-        const precoUnitario = new Prisma.Decimal(item.precoUnitario);
         const variedadeId = item.variedadeId || null;
 
         if (variedadeId) {
@@ -61,20 +59,6 @@ export class SalesService {
           }
         }
 
-        const quantidade = new Prisma.Decimal(item.quantidade);
-        const valorDesconto = new Prisma.Decimal(item.valorDesconto || 0);
-        let subtotal = precoUnitario.mul(quantidade);
-
-        // Apply per-unit discount * quantity
-        if (item.tipoDesconto === DiscountType.PERCENTAGE) {
-          const discountPerUnit = precoUnitario.mul(valorDesconto).div(100);
-          subtotal = subtotal.sub(discountPerUnit.mul(quantidade));
-        } else if (item.tipoDesconto === DiscountType.FIXED) {
-          subtotal = subtotal.sub(valorDesconto.mul(quantidade));
-        }
-
-        if (subtotal.lt(0)) subtotal = new Prisma.Decimal(0);
-
         await tx.itemVenda.create({
           data: {
             vendaId: venda.id,
@@ -86,28 +70,15 @@ export class SalesService {
             valorDesconto: item.valorDesconto || 0,
           },
         });
-
-        totalVenda = totalVenda.add(subtotal);
       }
 
-      // Apply global discount
-      if (descontoGeralTipo && descontoGeralValor && descontoGeralValor > 0) {
-        if (descontoGeralTipo === DiscountType.PERCENTAGE) {
-          const globalDiscountValue = totalVenda
-            .mul(new Prisma.Decimal(descontoGeralValor))
-            .div(100);
-          totalVenda = totalVenda.sub(globalDiscountValue);
-        } else if (descontoGeralTipo === DiscountType.FIXED) {
-          totalVenda = totalVenda.sub(new Prisma.Decimal(descontoGeralValor));
-        }
-      }
-
-      if (totalVenda.lt(0)) totalVenda = new Prisma.Decimal(0);
-
-      // Add delivery fee
-      if (taxaEntrega && taxaEntrega > 0) {
-        totalVenda = totalVenda.add(new Prisma.Decimal(taxaEntrega));
-      }
+      // A conta de dinheiro mora em `sale-totals.ts`, e o recibo em PDF usa a
+      // mesma. Duas cópias já discordaram em três pontos.
+      const { total: totalVenda } = resumirVenda(itens, {
+        descontoGeralTipo,
+        descontoGeralValor,
+        taxaEntrega,
+      });
 
       // Update the sale with final total
       return tx.venda.update({

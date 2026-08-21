@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { resumirVenda } from '../sales/sale-totals';
 import * as path from 'path';
 import type {
   Content,
@@ -98,43 +99,18 @@ export class PdfService {
         'MEI - Microempreendedor Individual',
     };
 
-    // Calculate totals
-    let subtotal = 0;
-    let totalItemsDiscount = 0;
-
-    sale.itens.forEach((item: PdfSaleItem) => {
-      const itemSubtotal = Number(item.quantidade) * Number(item.precoUnitario);
-      subtotal += itemSubtotal;
-
-      // Calculate per-unit discount * quantity
-      if (item.tipoDesconto && item.valorDesconto) {
-        if (item.tipoDesconto === 'percentage') {
-          totalItemsDiscount +=
-            ((Number(item.precoUnitario) * Number(item.valorDesconto)) / 100) *
-            Number(item.quantidade);
-        } else if (item.tipoDesconto === 'fixed') {
-          totalItemsDiscount +=
-            Number(item.valorDesconto) * Number(item.quantidade);
-        }
-      }
+    // A conta é a mesma que gravou o total no banco (`sale-totals.ts`). Antes
+    // este bloco tinha a própria versão, em `Number`, e discordava em três
+    // pontos — o recibo imprimia linhas que não fechavam com o próprio TOTAL.
+    const resumo = resumirVenda(sale.itens, {
+      descontoGeralTipo: sale.descontoGeralTipo,
+      descontoGeralValor: sale.descontoGeralValor,
+      taxaEntrega: sale.taxaEntrega,
     });
-
-    // Calculate global discount
-    let globalDiscountValue = 0;
-    const subtotalAfterItemDiscounts = subtotal - totalItemsDiscount;
-    if (
-      sale.descontoGeralTipo &&
-      sale.descontoGeralValor &&
-      Number(sale.descontoGeralValor) > 0
-    ) {
-      if (sale.descontoGeralTipo === 'percentage') {
-        globalDiscountValue =
-          (subtotalAfterItemDiscounts * Number(sale.descontoGeralValor)) / 100;
-      } else if (sale.descontoGeralTipo === 'fixed') {
-        globalDiscountValue = Number(sale.descontoGeralValor);
-      }
-    }
-
+    const subtotal = Number(resumo.subtotal);
+    const totalItemsDiscount = Number(resumo.descontoItens);
+    const globalDiscountValue = Number(resumo.descontoGeral);
+    const taxaEntrega = Number(resumo.taxaEntrega);
     // Build totals section
     const totalsStack: Content[] = [];
 
@@ -191,6 +167,27 @@ export class PdfService {
           {
             text: `-R$ ${globalDiscountValue.toFixed(2).replace('.', ',')}`,
             style: 'discountValue',
+            alignment: 'right',
+          },
+        ],
+      });
+    }
+
+    // Taxa de entrega. Ela não existia aqui — nem no tipo —, mas entra no total
+    // gravado, então toda venda com entrega imprimia um recibo cujas linhas não
+    // somavam o TOTAL logo abaixo delas.
+    if (taxaEntrega > 0) {
+      totalsStack.push({
+        columns: [
+          {
+            text: 'Taxa de Entrega:',
+            style: 'totalLabel',
+            alignment: 'right',
+            margin: [0, 0, 10, 0],
+          },
+          {
+            text: `R$ ${taxaEntrega.toFixed(2).replace('.', ',')}`,
+            style: 'totalValue',
             alignment: 'right',
           },
         ],

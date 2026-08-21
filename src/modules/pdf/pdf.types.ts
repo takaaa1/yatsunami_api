@@ -37,6 +37,8 @@ export interface PdfSale {
   observacoes?: string | null;
   descontoGeralTipo?: string | null;
   descontoGeralValor?: NumericLike | null;
+  /** Entra no total gravado, então precisa aparecer no recibo. */
+  taxaEntrega?: NumericLike | null;
   itens: PdfSaleItem[];
 }
 
