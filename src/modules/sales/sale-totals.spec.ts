@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { resumirVenda, LinhaDeVenda } from './sale-totals';
+import { resumirVenda, conferirDescontos, LinhaDeVenda } from './sale-totals';
 import { DiscountType } from './dto/create-sale.dto';
 
 /**
@@ -76,6 +76,25 @@ describe('resumirVenda', () => {
       ]);
 
       expect(txt(r.total)).toBe('15');
+    });
+
+    /**
+     * O corte por item, sozinho. Este caso vivia em `sales.service.spec.ts`;
+     * mudou de casa quando o serviço passou a **recusar** o desconto exagerado
+     * em vez de cortá-lo. O corte segue existindo como defesa para dado que
+     * chegue por outro caminho, e é aqui que ele fica guardado.
+     */
+    it('desconto maior que o item zera o item, não fica negativo', () => {
+      const r = resumirVenda([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 50,
+        }),
+      ]);
+
+      expect(txt(r.total)).toBe('0');
+      expect(txt(r.descontoItens)).toBe('10');
     });
 
     /**
@@ -229,5 +248,158 @@ describe('resumirVenda', () => {
       );
       expect(conferir(r)).toBe(txt(r.total));
     });
+  });
+});
+
+/**
+ * Desconto fixo não pode passar do que está sendo descontado.
+ *
+ * Antes, um desconto exagerado era **cortado em zero, em silêncio**: o operador
+ * digitava R$ 50 num item de R$ 10, e a venda saía com o item zerado sem que
+ * nada dissesse que os outros R$ 40 sumiram. O corte continua existindo como
+ * defesa, mas agora ele é inalcançável pelo caminho normal — o pedido é
+ * recusado antes.
+ */
+describe('conferirDescontos', () => {
+  describe('desconto por item', () => {
+    it('aceita desconto igual ao preço da unidade', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 10,
+        }),
+      ]);
+
+      expect(p).toEqual([]);
+    });
+
+    /** O limite é o preço **da unidade**, porque o desconto fixo é por unidade. */
+    it('recusa desconto maior que o preço da unidade', () => {
+      const p = conferirDescontos([
+        item({
+          quantidade: 3,
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 12,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        { escopo: 'item', indice: 0, valor: '12', limite: '10' },
+      ]);
+    });
+
+    it('aponta qual item está errado', () => {
+      const p = conferirDescontos([
+        item({ precoUnitario: 40 }),
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 50,
+        }),
+      ]);
+
+      expect(p).toEqual([
+        { escopo: 'item', indice: 1, valor: '50', limite: '10' },
+      ]);
+    });
+
+    /** Percentual tem outra regra e não entra aqui. */
+    it('não olha desconto percentual', () => {
+      const p = conferirDescontos([
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.PERCENTAGE,
+          valorDesconto: 90,
+        }),
+      ]);
+
+      expect(p).toEqual([]);
+    });
+  });
+
+  describe('desconto geral', () => {
+    it('aceita desconto igual ao total dos itens', () => {
+      const p = conferirDescontos([item({ precoUnitario: 100 })], {
+        descontoGeralTipo: DiscountType.FIXED,
+        descontoGeralValor: 100,
+      });
+
+      expect(p).toEqual([]);
+    });
+
+    it('recusa desconto maior que o total dos itens', () => {
+      const p = conferirDescontos([item({ precoUnitario: 100 })], {
+        descontoGeralTipo: DiscountType.FIXED,
+        descontoGeralValor: 150,
+      });
+
+      expect(p).toEqual([{ escopo: 'geral', valor: '150', limite: '100' }]);
+    });
+
+    /**
+     * O limite é o total **já descontado item a item** — é sobre ele que o
+     * desconto geral incide. Usar o preço cheio deixaria passar um desconto que
+     * ainda assim zeraria a venda.
+     */
+    it('o limite é o total depois dos descontos de item', () => {
+      const p = conferirDescontos(
+        [
+          item({
+            quantidade: 2,
+            precoUnitario: 100,
+            tipoDesconto: DiscountType.PERCENTAGE,
+            valorDesconto: 10,
+          }),
+        ],
+        { descontoGeralTipo: DiscountType.FIXED, descontoGeralValor: 190 },
+      );
+
+      // 2 × 90 = 180, então 190 não cabe — mesmo sendo menor que os 200 cheios.
+      expect(p).toEqual([{ escopo: 'geral', valor: '190', limite: '180' }]);
+    });
+
+    it('a taxa de entrega não aumenta o limite', () => {
+      const p = conferirDescontos([item({ precoUnitario: 100 })], {
+        descontoGeralTipo: DiscountType.FIXED,
+        descontoGeralValor: 105,
+        taxaEntrega: 20,
+      });
+
+      expect(p).toEqual([{ escopo: 'geral', valor: '105', limite: '100' }]);
+    });
+
+    it('não olha desconto percentual', () => {
+      const p = conferirDescontos([item({ precoUnitario: 10 })], {
+        descontoGeralTipo: DiscountType.PERCENTAGE,
+        descontoGeralValor: 100,
+      });
+
+      expect(p).toEqual([]);
+    });
+  });
+
+  it('venda sem desconto nenhum não tem o que recusar', () => {
+    expect(conferirDescontos([item()])).toEqual([]);
+  });
+
+  it('acusa os dois escopos de uma vez', () => {
+    const p = conferirDescontos(
+      [
+        item({
+          precoUnitario: 10,
+          tipoDesconto: DiscountType.FIXED,
+          valorDesconto: 50,
+        }),
+      ],
+      { descontoGeralTipo: DiscountType.FIXED, descontoGeralValor: 5 },
+    );
+
+    // O item some inteiro, então sobra zero para o desconto geral incidir.
+    expect(p).toEqual([
+      { escopo: 'item', indice: 0, valor: '50', limite: '10' },
+      { escopo: 'geral', valor: '5', limite: '0' },
+    ]);
   });
 });

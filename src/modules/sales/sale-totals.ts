@@ -129,3 +129,66 @@ export function resumirVenda(
     total: depoisDoGeral.add(taxaEntrega),
   };
 }
+
+/** Um desconto fixo que passa do que ele desconta. */
+export interface ProblemaDeDesconto {
+  escopo: 'item' | 'geral';
+  /** Posição do item na lista; ausente no desconto geral. */
+  indice?: number;
+  /** O que foi pedido, como texto — `Decimal` não compara bem em teste. */
+  valor: string;
+  /** O máximo que cabia. */
+  limite: string;
+}
+
+/**
+ * Confere se os descontos **fixos** cabem no que descontam.
+ *
+ * O corte em zero de `resumirVenda` continua existindo como defesa, mas ele
+ * apagava o excesso **em silêncio**: quem digitasse R$ 50 num item de R$ 10 via
+ * a venda sair com o item zerado, e nada dizia que os outros R$ 40 sumiram.
+ *
+ * Duas regras, ambas so para `fixed`:
+ *
+ * - item: o limite é o preço **da unidade**, porque o desconto fixo é por unidade;
+ * - geral: o limite é o total **já descontado item a item**, que é sobre o que
+ *   ele incide. A taxa de entrega não entra: ela é somada depois, e não está
+ *   sendo descontada.
+ *
+ * Percentual segue por outro caminho e não é conferido aqui.
+ */
+export function conferirDescontos(
+  itens: LinhaDeVenda[],
+  ajustes: AjustesDaVenda = {},
+): ProblemaDeDesconto[] {
+  const problemas: ProblemaDeDesconto[] = [];
+
+  itens.forEach((linha, indice) => {
+    if (linha.tipoDesconto !== FIXO) return;
+    const preco = dec(linha.precoUnitario);
+    const desconto = dec(linha.valorDesconto);
+    if (desconto.gt(preco)) {
+      problemas.push({
+        escopo: 'item',
+        indice,
+        valor: desconto.toString(),
+        limite: preco.toString(),
+      });
+    }
+  });
+
+  if (ajustes.descontoGeralTipo === FIXO) {
+    const desconto = dec(ajustes.descontoGeralValor);
+    const { subtotal, descontoItens } = resumirVenda(itens);
+    const limite = subtotal.sub(descontoItens);
+    if (desconto.gt(limite)) {
+      problemas.push({
+        escopo: 'geral',
+        valor: desconto.toString(),
+        limite: limite.toString(),
+      });
+    }
+  }
+
+  return problemas;
+}

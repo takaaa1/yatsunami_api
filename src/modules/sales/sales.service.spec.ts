@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSaleDto, DiscountType } from './dto/create-sale.dto';
@@ -140,34 +140,6 @@ describe('SalesService.create', () => {
       expect(totalGravado()).toBe('15');
     });
 
-    it('desconto maior que o item zera o item, não fica negativo', async () => {
-      await venda([
-        item({
-          quantidade: 1,
-          precoUnitario: 10,
-          tipoDesconto: DiscountType.FIXED,
-          valorDesconto: 50,
-        }),
-      ]);
-
-      expect(totalGravado()).toBe('0');
-    });
-
-    it('um item zerado não come o valor dos outros', async () => {
-      await venda([
-        item({
-          produtoId: 1,
-          quantidade: 1,
-          precoUnitario: 10,
-          tipoDesconto: DiscountType.FIXED,
-          valorDesconto: 50,
-        }),
-        item({ produtoId: 1, quantidade: 1, precoUnitario: 40 }),
-      ]);
-
-      expect(totalGravado()).toBe('40');
-    });
-
     it('grava no item o preço e o desconto originais, não o subtotal', async () => {
       await venda([
         item({
@@ -220,15 +192,6 @@ describe('SalesService.create', () => {
 
       expect(totalGravado()).toBe('10');
     });
-
-    it('desconto maior que a venda zera o total', async () => {
-      await venda([item({ precoUnitario: 10 })], {
-        descontoGeralTipo: DiscountType.FIXED,
-        descontoGeralValor: 500,
-      });
-
-      expect(totalGravado()).toBe('0');
-    });
   });
 
   describe('taxa de entrega', () => {
@@ -236,22 +199,6 @@ describe('SalesService.create', () => {
       await venda([item({ precoUnitario: 40 })], { taxaEntrega: 8 });
 
       expect(totalGravado()).toBe('48');
-    });
-
-    /**
-     * O segundo ponto sutil, e o mais fácil de quebrar numa reordenação: o
-     * frete entra **depois** do corte em zero. Se entrasse antes, um desconto
-     * geral maior que a venda engoliria também a taxa, e o estabelecimento
-     * pagaria a entrega do próprio bolso.
-     */
-    it('sobrevive a um desconto que zera a venda', async () => {
-      await venda([item({ precoUnitario: 10 })], {
-        descontoGeralTipo: DiscountType.FIXED,
-        descontoGeralValor: 500,
-        taxaEntrega: 8,
-      });
-
-      expect(totalGravado()).toBe('8');
     });
 
     it('taxa zero não muda nada', async () => {
@@ -296,6 +243,81 @@ describe('SalesService.create', () => {
     });
   });
 
+  /**
+   * A recusa acontece **antes da transação**: nenhuma venda meio-criada, e o
+   * corte em zero de `resumirVenda` deixa de ser alcançável pelo caminho
+   * normal. Ele continua lá como defesa para dado que venha de outro lugar.
+   */
+  describe('desconto que não cabe', () => {
+    it('recusa desconto de item maior que o preço da unidade', async () => {
+      await expect(
+        venda([
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.FIXED,
+            valorDesconto: 50,
+          }),
+        ]),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('recusa desconto geral maior que o total dos itens', async () => {
+      await expect(
+        venda([item({ precoUnitario: 10 })], {
+          descontoGeralTipo: DiscountType.FIXED,
+          descontoGeralValor: 500,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('não cria nada quando recusa', async () => {
+      await expect(
+        venda([
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.FIXED,
+            valorDesconto: 50,
+          }),
+        ]),
+      ).rejects.toThrow();
+
+      expect(tx.venda.create).not.toHaveBeenCalled();
+      expect(tx.itemVenda.create).not.toHaveBeenCalled();
+    });
+
+    /** A mensagem tem de dizer qual item, em numeração humana. */
+    it('a mensagem aponta o item, contando de um', async () => {
+      await expect(
+        venda([
+          item({ precoUnitario: 40 }),
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.FIXED,
+            valorDesconto: 50,
+          }),
+        ]),
+      ).rejects.toThrow(/item 2/);
+    });
+
+    it('desconto igual ao limite passa', async () => {
+      await expect(
+        venda([
+          item({
+            precoUnitario: 10,
+            tipoDesconto: DiscountType.FIXED,
+            valorDesconto: 10,
+          }),
+        ]),
+      ).resolves.toBeTruthy();
+    });
+  });
+
+  /**
+   * Os quatro casos de "desconto exagerado é cortado em zero" saíram daqui: o
+   * serviço agora **recusa** essa venda, então o corte não é mais alcançável por
+   * este caminho. Ele continua existindo como defesa, e continua guardado — em
+   * `sale-totals.spec.ts`, que testa o módulo puro sem passar pelo serviço.
+   */
   it('registra quem criou a venda', async () => {
     await venda([item()]);
 
