@@ -27,7 +27,42 @@ export class ExpressOrdersService {
     return { enabled: !!client?.habilitado };
   }
 
+  /**
+   * `dataEntrega` é o único campo de data que o cliente escolhe livremente: o
+   * fluxo de encomenda usa `dataEncomendaId`, chave para uma tabela do próprio
+   * servidor. O DTO só tinha `@IsDateString()`, que valida formato — nada
+   * impedia uma data no passado.
+   *
+   * Do lado do app a data ficava congelada no carregamento do módulo, e um app
+   * aberto durante a noite mandava ontem. Cada lado confiava no outro.
+   *
+   * **A tolerância de um dia é deliberada.** `toISOString()` normaliza para UTC
+   * e perde o deslocamento, então o servidor não tem como reconstruir o dia de
+   * calendário do cliente; um limite estrito de "não antes de hoje" recusaria
+   * pedidos legítimos feitos perto da virada, em fuso diferente do servidor. O
+   * alvo aqui é barrar disparate — data de semanas atrás, ou repetição de uma
+   * requisição antiga —, não arbitrar a regra do meio-dia, que é do app.
+   */
+  private validarDataDeEntrega(dataEntrega?: string) {
+    if (!dataEntrega) return;
+
+    const escolhida = new Date(dataEntrega);
+    if (Number.isNaN(escolhida.getTime())) {
+      throw new BadRequestException('Invalid delivery date');
+    }
+
+    const limite = new Date();
+    limite.setDate(limite.getDate() - 1);
+    limite.setHours(0, 0, 0, 0);
+
+    if (escolhida < limite) {
+      throw new BadRequestException('Delivery date cannot be in the past');
+    }
+  }
+
   async create(userId: string, dto: CreateExpressOrderDto) {
+    this.validarDataDeEntrega(dto.dataEntrega);
+
     // Check if user is enabled
     const client = await this.prisma.clientePedidoDireto.findUnique({
       where: { usuarioId: userId },

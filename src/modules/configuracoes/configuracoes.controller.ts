@@ -6,10 +6,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import {
-  broadcastAfter,
-  type BroadcastEventType,
-} from '../../common/realtime/broadcast-after';
+import { broadcastAfter } from '../../common/realtime/broadcast-after';
 
 @ApiTags('Configuracoes')
 @Controller('configuracoes')

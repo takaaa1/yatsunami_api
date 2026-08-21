@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExpressOrdersService } from './express-orders.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -173,6 +174,127 @@ describe('ExpressOrdersService (perf Fase 2)', () => {
    * fluxo de entrega foi religado. Sem estas emissões o catálogo do pedido
    * direto só atualiza quando a tela é reaberta.
    */
+  /**
+   * A outra metade da fronteira da §6l do app.
+   *
+   * `dataEntrega` é o **único** campo de data que o cliente escolhe livremente
+   * — o fluxo de encomenda usa `dataEncomendaId`, chave para uma tabela do
+   * próprio servidor. E o DTO só tinha `@IsDateString()`, que valida formato,
+   * não que a data faça sentido.
+   *
+   * Do lado do app, a data de entrega ficava congelada no carregamento do
+   * módulo e um app aberto durante a noite mandava ontem. Cada lado confiava no
+   * outro; nenhum validava.
+   */
+  describe('data de entrega', () => {
+    const emDias = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return d.toISOString();
+    };
+
+    const montarServico = async () => {
+      const createPedido = jest.fn().mockResolvedValue({
+        id: 10,
+        codigo: 'ABC123',
+        usuario: { id: 'user-1', nome: 'Cliente' },
+        itens: [],
+      });
+      const prisma = {
+        clientePedidoDireto: {
+          findUnique: jest.fn().mockResolvedValue({ habilitado: true }),
+        },
+        produto: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 1,
+              preco: 100,
+              nome: { 'pt-BR': 'Prod A' },
+              variedades: [],
+            },
+          ]),
+          findUnique: jest.fn(),
+        },
+        produtoPedidoDireto: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ produtoId: 1, habilitado: true }]),
+        },
+        variedadePedidoDireto: { findMany: jest.fn().mockResolvedValue([]) },
+        pedidoDireto: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: createPedido,
+        },
+        usuario: { findMany: jest.fn().mockResolvedValue([{ id: 'admin-1' }]) },
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          ExpressOrdersService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: NotificationsService, useValue: notificationsService },
+          { provide: RealtimeGateway, useValue: realtimeGateway },
+        ],
+      }).compile();
+
+      return {
+        service: module.get<ExpressOrdersService>(ExpressOrdersService),
+        createPedido,
+      };
+    };
+
+    const pedido = (dataEntrega?: string) => ({
+      itens: [{ produtoId: 1, quantidade: 1 }],
+      ...(dataEntrega ? { dataEntrega } : {}),
+    });
+
+    it('recusa data claramente no passado', async () => {
+      const { service: s, createPedido } = await montarServico();
+
+      await expect(s.create('user-1', pedido(emDias(-30)))).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(createPedido).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['hoje', 0],
+      ['amanhã', 1],
+      ['semana que vem', 7],
+    ])('aceita %s', async (_nome, dias) => {
+      const { service: s, createPedido } = await montarServico();
+
+      await s.create('user-1', pedido(emDias(dias)));
+
+      expect(createPedido).toHaveBeenCalledTimes(1);
+    });
+
+    it('aceita pedido sem data — o servidor usa agora', async () => {
+      const { service: s, createPedido } = await montarServico();
+
+      await s.create('user-1', pedido());
+
+      expect(createPedido).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Tolerância de um dia, deliberada. `toISOString()` normaliza para UTC e
+     * **perde o deslocamento**, então o servidor não tem como reconstruir o dia
+     * de calendário do cliente. Um limite estrito de "não antes de hoje"
+     * recusaria pedidos legítimos feitos perto da virada, em fuso diferente do
+     * servidor. Aqui o alvo é barrar disparate — data de semanas atrás, ou
+     * repetição de requisição antiga —, não arbitrar a regra do meio-dia, que é
+     * do app.
+     */
+    it('tolera um dia de defasagem, por causa do fuso', async () => {
+      const { service: s, createPedido } = await montarServico();
+
+      await s.create('user-1', pedido(emDias(-1)));
+
+      expect(createPedido).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('emissões de realtime', () => {
     const buildService = async (prisma: Record<string, unknown>) => {
       const module: TestingModule = await Test.createTestingModule({
