@@ -210,10 +210,13 @@ describe('OrderFormsService — concluir e reabrir', () => {
     });
 
     /**
-     * Comportamento atual, travado aqui como observação, não como aprovação:
-     * reabrir **não** reativa o formulário. Quem reabre para voltar a receber
-     * pedidos precisa marcar `ativo` também — do contrário a criação de pedido
-     * segue recusada com "esta data de encomenda não está mais ativa".
+     * Comportamento **intencional**, confirmado pelo dono do produto em
+     * 2026-08-21: reabrir não reativa o formulário, do mesmo modo que concluir
+     * é ato manual. Reabrir e voltar a receber pedidos são duas decisões
+     * separadas — quem reabre precisa marcar `ativo` à parte, senão a criação
+     * de pedido segue recusada com "esta data de encomenda não está mais ativa".
+     *
+     * O teste existe para que a separação não se perca numa reescrita.
      */
     it('reabrir não reativa o formulário sozinho', async () => {
       await service.update(7, { concluido: false });
