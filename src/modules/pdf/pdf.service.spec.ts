@@ -220,3 +220,51 @@ describe('PdfService.generatePdf — atravessa o pdfmake', () => {
     expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
   }, 20000);
 });
+
+/**
+ * A data de entrega do resumo — dia de calendário, não instante.
+ *
+ * `dataEntrega` é `DATE` no banco e chega como meia-noite UTC. Formatá-la sem
+ * fixar o fuso lê o instante no fuso do **processo**: hoje o contêiner roda em
+ * UTC e por isso o resultado sai certo por acidente. Bastaria alguém pôr
+ * `TZ=America/Sao_Paulo` no compose para o resumo passar a imprimir o dia
+ * anterior — que foi exatamente o defeito que apareceu no gerador do app, onde
+ * o fuso é o do aparelho.
+ *
+ * O caso abaixo trava isso independentemente do fuso em que a suíte roda.
+ */
+describe('PdfService.generateOrderSummary — data de entrega', () => {
+  let service: PdfService;
+  let definicao: TDocumentDefinitions;
+
+  beforeEach(() => {
+    service = new PdfService();
+    jest
+      .spyOn(service, 'generatePdf')
+      .mockImplementation((doc: TDocumentDefinitions) => {
+        definicao = doc;
+        return Promise.resolve(Buffer.from(''));
+      });
+  });
+
+  const gerar = (date: string) =>
+    service.generateOrderSummary({ date, orders: [{ itens: [item()] }] });
+
+  it('imprime o dia do calendário, não o instante no fuso do processo', async () => {
+    await gerar('2026-08-27T00:00:00.000Z');
+
+    const linha = textos(definicao.content).find((t) =>
+      t.startsWith('Data de Entrega:'),
+    );
+    expect(linha).toBe('Data de Entrega: 27/08/2026');
+  });
+
+  it('primeiro dia do mês não vira o mês anterior', async () => {
+    await gerar('2026-09-01T00:00:00.000Z');
+
+    const linha = textos(definicao.content).find((t) =>
+      t.startsWith('Data de Entrega:'),
+    );
+    expect(linha).toBe('Data de Entrega: 01/09/2026');
+  });
+});

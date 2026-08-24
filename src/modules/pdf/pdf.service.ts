@@ -442,7 +442,13 @@ export class PdfService {
       content: [
         { text: 'RESUMO DE PEDIDOS', style: 'header', alignment: 'center' },
         {
-          text: `Data de Entrega: ${new Date(date).toLocaleDateString('pt-BR')}`,
+          // `timeZone: 'UTC'` porque `dataEntrega` é dia de calendário, não
+          // instante: é `DATE` no banco e chega como meia-noite UTC. Sem fixar,
+          // a formatação usa o fuso do **processo** — hoje o contêiner roda em
+          // UTC e sai certo por acidente, mas um `TZ=America/Sao_Paulo` no
+          // compose faria o resumo imprimir o dia anterior. Foi esse o defeito
+          // que apareceu no gerador do app, onde o fuso é o do aparelho.
+          text: `Data de Entrega: ${new Date(date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`,
           style: 'subheader',
           alignment: 'center',
         },
