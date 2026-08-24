@@ -7,9 +7,9 @@ import { SalesModule } from '../sales/sales.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-    imports: [PrismaModule, PdfModule, SalesModule, NotificationsModule],
-    controllers: [OrderFormsController],
-    providers: [OrderFormsService],
-    exports: [OrderFormsService],
+  imports: [PrismaModule, PdfModule, SalesModule, NotificationsModule],
+  controllers: [OrderFormsController],
+  providers: [OrderFormsService],
+  exports: [OrderFormsService],
 })
-export class OrderFormsModule { }
+export class OrderFormsModule {}

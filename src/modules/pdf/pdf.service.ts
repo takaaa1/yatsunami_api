@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { resumirVenda } from '../sales/sale-totals';
+import {
+  FUSO_DO_NEGOCIO,
+  diaDeCalendario,
+  instanteLocal,
+} from '../../common/utils/datas';
 import * as path from 'path';
 import type {
   Content,
@@ -80,6 +85,13 @@ export class PdfService {
       );
       throw error;
     }
+  }
+
+  /** O dia da venda no fuso do negócio, em `yyyy-mm-dd`. */
+  private static diaDaVenda(valor: Date | string): string {
+    return new Date(valor).toLocaleDateString('en-CA', {
+      timeZone: FUSO_DO_NEGOCIO,
+    });
   }
 
   private getLocalizedText(field: LocalizedField): string {
@@ -254,11 +266,14 @@ export class PdfService {
           style: 'label',
         },
         {
-          text: `Data e Hora: ${new Date(sale.data).toLocaleString('pt-BR')}`,
+          text: `Data e Hora: ${instanteLocal(sale.data)}`,
           style: 'companyInfo',
         },
         {
-          text: `Data: ${new Date(sale.data).toISOString().split('T')[0]}`,
+          // `toISOString()` daria o dia **em UTC**: uma venda das 21h30 no
+          // Brasil é 00h30 UTC do dia seguinte, e o recibo sairia com a data de
+          // amanhã. O dia aqui é o mesmo do "Data e Hora" logo acima.
+          text: `Data: ${PdfService.diaDaVenda(sale.data)}`,
           style: 'companyInfo',
         },
 
@@ -442,13 +457,8 @@ export class PdfService {
       content: [
         { text: 'RESUMO DE PEDIDOS', style: 'header', alignment: 'center' },
         {
-          // `timeZone: 'UTC'` porque `dataEntrega` é dia de calendário, não
-          // instante: é `DATE` no banco e chega como meia-noite UTC. Sem fixar,
-          // a formatação usa o fuso do **processo** — hoje o contêiner roda em
-          // UTC e sai certo por acidente, mas um `TZ=America/Sao_Paulo` no
-          // compose faria o resumo imprimir o dia anterior. Foi esse o defeito
-          // que apareceu no gerador do app, onde o fuso é o do aparelho.
-          text: `Data de Entrega: ${new Date(date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`,
+          // Dia de calendário, não instante -- ver `datas.ts`.
+          text: `Data de Entrega: ${diaDeCalendario(date)}`,
           style: 'subheader',
           alignment: 'center',
         },

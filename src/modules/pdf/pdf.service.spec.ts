@@ -268,3 +268,56 @@ describe('PdfService.generateOrderSummary — data de entrega', () => {
     expect(linha).toBe('Data de Entrega: 01/09/2026');
   });
 });
+
+/**
+ * O horário impresso no recibo.
+ *
+ * O contêiner roda em UTC. Sem fixar o fuso, uma venda das 18h em São Paulo
+ * saía impressa como **21h** — e uma das 21h30 pulava para a data do dia
+ * seguinte, porque `toISOString()` dá o dia em UTC.
+ *
+ * O negócio opera só no Brasil; ja-JP é preferência de leitura, não outro fuso.
+ */
+describe('PdfService.generateSaleReceipt — data e hora', () => {
+  let service: PdfService;
+  let definicao: TDocumentDefinitions;
+
+  beforeEach(() => {
+    service = new PdfService();
+    jest
+      .spyOn(service, 'generatePdf')
+      .mockImplementation((doc: TDocumentDefinitions) => {
+        definicao = doc;
+        return Promise.resolve(Buffer.from(''));
+      });
+  });
+
+  const linhaQueComeca = (prefixo: string) =>
+    textos(definicao.content).find((t) => t.startsWith(prefixo));
+
+  it('imprime a hora do Brasil, não a do processo', async () => {
+    // 21h UTC = 18h em São Paulo.
+    await service.generateSaleReceipt(
+      venda({ data: '2026-08-27T21:00:00.000Z' }),
+    );
+
+    expect(linhaQueComeca('Data e Hora:')).toBe(
+      'Data e Hora: 27/08/2026, 18:00:00',
+    );
+  });
+
+  /**
+   * O caso que mais dói: 21h30 no Brasil é 00h30 UTC do **dia seguinte**. As
+   * duas linhas do recibo têm de concordar entre si.
+   */
+  it('venda da noite não pula para o dia seguinte', async () => {
+    await service.generateSaleReceipt(
+      venda({ data: '2026-08-28T00:30:00.000Z' }),
+    );
+
+    expect(linhaQueComeca('Data e Hora:')).toBe(
+      'Data e Hora: 27/08/2026, 21:30:00',
+    );
+    expect(linhaQueComeca('Data:')).toBe('Data: 2026-08-27');
+  });
+});

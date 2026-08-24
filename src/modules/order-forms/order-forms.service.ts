@@ -12,6 +12,7 @@ import {
   CRON_LOCK_KEYS,
   isBackgroundJobRuntime,
 } from '../../common/runtime/runtime.config';
+import { diaDeCalendario } from '../../common/utils/datas';
 
 @Injectable()
 export class OrderFormsService {
@@ -569,9 +570,9 @@ export class OrderFormsService {
       select: { id: true },
     });
 
-    const formattedDate = new Date(orderForm.data_entrega).toLocaleDateString(
-      'pt-BR',
-    );
+    // Dia de calendário, não instante: sem fixar UTC a notificação anunciaria a
+    // véspera em qualquer fuso negativo. Ver `common/utils/datas.ts`.
+    const formattedDate = diaDeCalendario(orderForm.data_entrega);
 
     return {
       recipientCount: users.length,
