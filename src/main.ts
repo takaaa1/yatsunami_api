@@ -21,6 +21,12 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Cadeia de proxies à frente do Node: Cloudflare → nginx do host → nginx do
+  // slot blue/green. Sem isto `req.ip` é sempre 127.0.0.1 e o log de acesso não
+  // identifica a origem. A contagem é feita a partir da direita, por isso um
+  // X-Forwarded-For forjado pelo cliente (que entra pela esquerda) não engana.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 3));
+
   // Socket.IO
   app.useWebSocketAdapter(new IoAdapter(app));
 

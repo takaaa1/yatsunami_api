@@ -20,6 +20,8 @@ NGINX_DIR="${NGINX_DIR:-deploy/nginx}"
 POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5432}"
 DB_WAIT_MAX_SEC="${DB_WAIT_MAX_SEC:-60}"
 UPLOADS_HOST_PATH="${UPLOADS_HOST_PATH:-/var/www/yatsunami/uploads}"
+LOG_ARCHIVE_DIR="${LOG_ARCHIVE_DIR:-/var/www/yatsunami/logs}"
+LOG_ARCHIVE_KEEP="${LOG_ARCHIVE_KEEP:-30}"
 IMAGE_NAME="${IMAGE_NAME:-yatsunami_api:latest}"
 
 log() { echo "[$(date -Iseconds)] $*"; }
@@ -136,7 +138,7 @@ run_api_job() {
   log "${label} (--network host)..."
   docker run --rm \
     --network host \
-    --env-file "$DOCKER_ENV_FILE" \
+    --log-opt max-size=50m \n    --log-opt max-file=5 \n    --env-file "$DOCKER_ENV_FILE" \
     "$IMAGE_NAME" \
     "$@"
 }
@@ -372,11 +374,34 @@ ensure_api_proxy() {
   start_api_proxy_container "$backend_port"
 }
 
+# Os logs de um contentor morrem com ele. Como o blue/green remove o slot antigo
+# a cada deploy, o rasto HTTP dos dias anteriores desaparecia — foi o que
+# aconteceu com a investigação da venda 312 (2026-08-23). Aqui despejamos o log
+# para disco antes de qualquer remoção.
+archive_container_logs() {
+  local name="$1" reason="${2:-rm}"
+  docker ps -a --format '{{.Names}}' | grep -qx "$name" || return 0
+  mkdir -p "$LOG_ARCHIVE_DIR" 2>/dev/null || return 0
+  local dest="${LOG_ARCHIVE_DIR}/${name}-${reason}-$(date -u +%Y%m%dT%H%M%SZ).log"
+  if timeout 60 docker logs "$name" </dev/null >"$dest" 2>&1; then
+    gzip -f "$dest" 2>/dev/null || true
+    log "Logs de ${name} arquivados em ${dest}.gz"
+  else
+    rm -f "$dest"
+    log "AVISO: não foi possível arquivar os logs de ${name}."
+  fi
+  # Retenção: mantém os últimos LOG_ARCHIVE_KEEP ficheiros.
+  ls -1t "${LOG_ARCHIVE_DIR}"/*.log.gz 2>/dev/null |
+    tail -n "+$((LOG_ARCHIVE_KEEP + 1))" |
+    xargs -r rm -f
+}
+
 run_api_slot() {
   local slot="$1"
   local port name
   port=$(slot_port "$slot")
   name=$(slot_container "$slot")
+  archive_container_logs "$name" "restart"
   docker rm -f "$name" 2>/dev/null || true
   log "A iniciar slot ${slot} (${name}) na porta ${port}..."
   prepare_docker_env_file
@@ -384,6 +409,8 @@ run_api_slot() {
     --name "$name" \
     --network host \
     --env-file "$DOCKER_ENV_FILE" \
+    --log-opt max-size=50m \
+    --log-opt max-file=5 \
     -e "PORT=${port}" \
     -v "${UPLOADS_HOST_PATH}:${UPLOADS_HOST_PATH}" \
     -e "UPLOADS_PATH=${UPLOADS_HOST_PATH}" \
@@ -415,6 +442,7 @@ rollback_blue_green() {
   write_active_backend_inc "$active_port"
   ensure_api_proxy "$active_port"
   reload_api_proxy
+  archive_container_logs "$standby_name" "rollback"
   docker rm -f "$standby_name" 2>/dev/null || true
   echo "$active" >"$DEPLOY_STATE_FILE"
 }
@@ -465,6 +493,7 @@ deploy_api_blue_green() {
   run_api_slot "$standby"
   if ! wait_for_api_health "$standby_port"; then
     timeout 10 docker logs "$standby_name" --tail 50 </dev/null 2>/dev/null || true
+    archive_container_logs "$standby_name" "healthfail"
     docker rm -f "$standby_name" 2>/dev/null || true
     exit 1
   fi
@@ -497,6 +526,7 @@ deploy_api_blue_green() {
 
   if [ "$active_was_running" = "1" ]; then
     log "A remover slot antigo ${active_name}..."
+    archive_container_logs "$active_name" "deploy"
     docker rm -f "$active_name" 2>/dev/null || true
   fi
 
