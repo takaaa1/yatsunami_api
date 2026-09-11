@@ -138,7 +138,7 @@ run_api_job() {
   log "${label} (--network host)..."
   docker run --rm \
     --network host \
-    --log-opt max-size=50m \n    --log-opt max-file=5 \n    --env-file "$DOCKER_ENV_FILE" \
+    --env-file "$DOCKER_ENV_FILE" \
     "$IMAGE_NAME" \
     "$@"
 }
