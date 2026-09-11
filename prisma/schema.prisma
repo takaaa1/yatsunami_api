@@ -9,40 +9,40 @@ datasource db {
 }
 
 model Usuario {
-  id                  String               @id
-  nome                String               @db.VarChar(255)
-  telefone            String?              @db.VarChar(50)
-  email               String               @unique @db.VarChar(255)
-  cpfCnpj             String?              @map("cpf_cnpj") @db.VarChar(20)
-  observacoes         String?
-  role                String               @default("user") @db.VarChar(20)
-  tema                String               @db.VarChar(20)
-  idioma              String               @db.VarChar(10)
-  endereco            Json                 @default("[]")
-  receberNotificacoes Boolean              @default(true) @map("receber_notificacoes")
-  ativo               Boolean              @default(true)
-  criadoEm            DateTime             @default(now()) @map("criado_em") @db.Timestamptz(6)
-  atualizadoEm        DateTime             @default(now()) @updatedAt @map("atualizado_em") @db.Timestamptz(6)
-  avatarUrl           String?              @map("avatar_url") @db.VarChar(500)
+  id                    String               @id
+  nome                  String               @db.VarChar(255)
+  telefone              String?              @db.VarChar(50)
+  email                 String               @unique @db.VarChar(255)
+  cpfCnpj               String?              @map("cpf_cnpj") @db.VarChar(20)
+  observacoes           String?
+  role                  String               @default("user") @db.VarChar(20)
+  tema                  String               @db.VarChar(20)
+  idioma                String               @db.VarChar(10)
+  endereco              Json                 @default("[]")
+  receberNotificacoes   Boolean              @default(true) @map("receber_notificacoes")
+  ativo                 Boolean              @default(true)
+  criadoEm              DateTime             @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm          DateTime             @default(now()) @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+  avatarUrl             String?              @map("avatar_url") @db.VarChar(500)
   /// App preferido para abrir ao tocar em "Navegar" nas rotas: google_maps | waze
-  appNavegacaoPreferido String             @default("google_maps") @map("app_navegacao_preferido") @db.VarChar(20)
-  expoPushToken       String?              @map("expo_push_token")
-  senhaHash           String?              @map("senha_hash")
-  clientePedidoDireto ClientePedidoDireto?
-  notificacoes        Notificacao[]
-  pedidosDiretos      PedidoDireto[]
-  pedidosEncomenda    PedidoEncomenda[]
-  vendasCriadas       Venda[]              @relation("VendaCriador")
-  vendas              Venda[]
+  appNavegacaoPreferido String               @default("google_maps") @map("app_navegacao_preferido") @db.VarChar(20)
+  expoPushToken         String?              @map("expo_push_token")
+  senhaHash             String?              @map("senha_hash")
+  clientePedidoDireto   ClientePedidoDireto?
+  notificacoes          Notificacao[]
+  pedidosDiretos        PedidoDireto[]
+  pedidosEncomenda      PedidoEncomenda[]
+  vendasCriadas         Venda[]              @relation("VendaCriador")
+  vendas                Venda[]
 
   @@index([role, ativo])
   @@map("usuarios")
 }
 
 model LegacyPasswordHash {
-  email       String   @id @db.VarChar(255)
-  passwordHash String  @map("password_hash") @db.Text
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  email        String   @id @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("legacy_password_hash")
 }
@@ -222,7 +222,13 @@ model PedidoEncomenda {
   emEntrega               Boolean               @default(false) @map("em_entrega")
   vendaId                 Int?                  @map("venda_id")
   horarioEstimadoEntrega  DateTime?             @map("horario_estimado_entrega") @db.Timestamptz(6)
+  /// Total confirmado quando o pagamento foi revertido para o cliente editar. Ver docs/PAGAMENTO-DIFERENCA-PIX.md.
+  valorPago               Decimal?              @map("valor_pago") @db.Decimal(10, 2)
+  reembolsoValor          Decimal?              @map("reembolso_valor") @db.Decimal(10, 2)
+  reembolsadoEm           DateTime?             @map("reembolsado_em") @db.Timestamptz(6)
+  reembolsadoPor          String?               @map("reembolsado_por")
   itens                   ItemPedidoEncomenda[]
+  comprovantes            ComprovantePedido[]
   notificacoes            Notificacao[]
   dataEncomenda           DataEncomenda         @relation(fields: [dataEncomendaId], references: [id])
   usuario                 Usuario               @relation(fields: [usuarioId], references: [id])
@@ -247,6 +253,25 @@ model ItemPedidoEncomenda {
   variedade     VariedadeProduto? @relation(fields: [variedadeId], references: [id])
 
   @@map("itens_pedido_encomenda")
+}
+
+/// Histórico de comprovantes PIX de um pedido de encomenda. `comprovanteUrl` do
+/// pedido continua sendo o último, para os apps antigos.
+model ComprovantePedido {
+  id                Int             @id @default(autoincrement())
+  pedidoEncomendaId Int             @map("pedido_encomenda_id")
+  url               String          @db.VarChar(1000)
+  /// Quanto este comprovante cobre — calculado no servidor a partir do `tipo`.
+  valor             Decimal         @db.Decimal(10, 2)
+  /// `integral` (primeiro pagamento), `diferenca` ou `total`.
+  tipo              String          @db.VarChar(20)
+  /// `em_analise` ou `confirmado`. Recusado é apagado.
+  status            String          @default("em_analise") @db.VarChar(20)
+  criadoEm          DateTime        @default(now()) @map("criado_em") @db.Timestamptz(6)
+  pedido            PedidoEncomenda @relation(fields: [pedidoEncomendaId], references: [id], onDelete: Cascade)
+
+  @@index([pedidoEncomendaId])
+  @@map("comprovantes_pedido")
 }
 
 model ClientePedidoDireto {

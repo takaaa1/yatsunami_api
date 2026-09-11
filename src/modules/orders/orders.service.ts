@@ -8,6 +8,14 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto } from './dto';
+import {
+  comprovanteNovo,
+  pagamentoJaCobre,
+  reembolsoNaConfirmacao,
+  situacaoDoPagamento,
+  valorPagoNoRevert,
+  type EscolhaDoCliente,
+} from './pagamento-diferenca';
 import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { QrCodePix } from 'qrcode-pix';
 import { StorageService } from '../../config/storage.service';
@@ -93,6 +101,7 @@ export class OrdersService {
   private async notifyOrderUpdatedToAdmins(
     orderId: number,
     actorUserId: string,
+    chave = 'notification.orderUpdated',
   ) {
     try {
       const [order, actor, admins] = await Promise.all([
@@ -124,7 +133,7 @@ export class OrdersService {
 
       await this.notificationsService.broadcastNotification({
         usuarioIds: targetAdmins,
-        chave: 'notification.orderUpdated',
+        chave,
         parametros: {
           userName: order.usuario?.nome || actor?.nome || 'Usuário',
           orderCode: order.codigo ?? '',
@@ -668,6 +677,7 @@ export class OrdersService {
     const order = await this.prisma.pedidoEncomenda.findUnique({
       where: { id },
       include: {
+        comprovantes: { orderBy: { criadoEm: 'asc' } },
         dataEncomenda: true,
         usuario: true,
         itens: {
@@ -742,6 +752,63 @@ export class OrdersService {
   }
 
   async update(id: number, userId: string, updateOrderDto: UpdateOrderDto) {
+    const atualizado = await this.atualizarItensEDados(
+      id,
+      userId,
+      updateOrderDto,
+    );
+    return (await this.moverParaAnaliseSeJaCoberto(id, userId)) ?? atualizado;
+  }
+
+  /**
+   * Pedido já pago, revertido para o cliente editar, cujo novo total o valor
+   * pago cobre: não há o que cobrar, então vai direto para análise, e os admins
+   * são avisados — sem isso ele entraria na fila sem comprovante novo e sem
+   * aviso. Devolve o pedido atualizado, ou `null` quando a regra não se aplica.
+   *
+   * Só vale para `pendente`: pedido de ponto especial fica `bloqueado` até o
+   * prazo e, se saísse da divisão da taxa compartilhada agora, mudaria o total
+   * dos vizinhos (`recalculateSharedFees` só considera pendente e bloqueado).
+   */
+  private async moverParaAnaliseSeJaCoberto(id: number, userId: string) {
+    const pedido = await this.prisma.pedidoEncomenda.findUnique({
+      where: { id },
+      select: { totalValor: true, valorPago: true, statusPagamento: true },
+    });
+    if (
+      !pedido ||
+      pedido.statusPagamento !== 'pendente' ||
+      !pagamentoJaCobre(pedido)
+    ) {
+      return null;
+    }
+
+    const atualizado = await this.prisma.pedidoEncomenda.update({
+      where: { id },
+      data: {
+        statusPagamento: 'aguardando_confirmacao',
+        statusPagamentoAnterior: pedido.statusPagamento,
+      },
+      include: {
+        comprovantes: { orderBy: { criadoEm: 'asc' } },
+        dataEncomenda: true,
+        itens: { include: { produto: true, variedade: true } },
+      },
+    });
+
+    await this.notifyOrderUpdatedToAdmins(
+      id,
+      userId,
+      'notification.paymentCoveredAwaiting',
+    );
+    return atualizado;
+  }
+
+  private async atualizarItensEDados(
+    id: number,
+    userId: string,
+    updateOrderDto: UpdateOrderDto,
+  ) {
     const order = await this.prisma.pedidoEncomenda.findUnique({
       where: { id },
       include: {
@@ -1024,7 +1091,12 @@ export class OrdersService {
     }
   }
 
-  async updateReceipt(id: number, userId: string, file: Express.Multer.File) {
+  async updateReceipt(
+    id: number,
+    userId: string,
+    file: Express.Multer.File,
+    escolha?: EscolhaDoCliente,
+  ) {
     const order = await this.prisma.pedidoEncomenda.findUnique({
       where: { id },
       include: { dataEncomenda: true },
@@ -1040,18 +1112,24 @@ export class OrdersService {
       );
     }
 
-    if (order.comprovanteUrl) {
-      try {
-        const oldPath = this.storageService.extractPathFromUrl(
-          order.comprovanteUrl,
-          'comprovantes',
-        );
-        if (oldPath)
-          await this.storageService.deleteFile('comprovantes', [oldPath]);
-      } catch (err) {
-        console.error('Erro ao deletar comprovante antigo:', err);
-      }
+    // Com pagamento anterior que já cobre o total não há o que pagar: o pedido
+    // está em análise e não mostra QR. Só o total pode ser pago de novo.
+    if (pagamentoJaCobre(order) && escolha !== 'total') {
+      throw new BadRequestException(
+        'O pagamento anterior já cobre este pedido',
+      );
     }
+
+    // O valor que o comprovante cobre sai da escolha do QR, nunca do app.
+    const novo = comprovanteNovo(order, escolha);
+
+    // Os comprovantes anteriores **não** são mais apagados: são a prova dos
+    // pagamentos já feitos. Só um ainda em análise é substituído — é o cliente
+    // trocando uma foto errada, e mantê-lo deixaria dois em análise.
+    const substituidos = await this.prisma.comprovantePedido.findMany({
+      where: { pedidoEncomendaId: id, status: 'em_analise' },
+      select: { id: true, url: true },
+    });
 
     const timestamp = Date.now();
     const contentType =
@@ -1076,24 +1154,45 @@ export class OrdersService {
       filePath,
     );
 
-    const updatedOrder = await this.prisma.pedidoEncomenda.update({
-      where: { id },
-      data: {
-        comprovanteUrl,
-        statusPagamento: 'aguardando_confirmacao',
-        statusPagamentoAnterior: order.statusPagamento,
-      },
-      include: {
-        dataEncomenda: true,
-        usuario: true,
-        itens: {
-          include: {
-            produto: true,
-            variedade: true,
+    const [, , updatedOrder] = await this.prisma.$transaction([
+      this.prisma.comprovantePedido.deleteMany({
+        where: { id: { in: substituidos.map((c) => c.id) } },
+      }),
+      this.prisma.comprovantePedido.create({
+        data: {
+          pedidoEncomendaId: id,
+          url: comprovanteUrl,
+          valor: novo.valor,
+          tipo: novo.tipo,
+          status: 'em_analise',
+        },
+      }),
+      this.prisma.pedidoEncomenda.update({
+        where: { id },
+        data: {
+          // Continua sendo o último comprovante: é o que os apps antigos leem.
+          comprovanteUrl,
+          statusPagamento: 'aguardando_confirmacao',
+          statusPagamentoAnterior: order.statusPagamento,
+        },
+        include: {
+          comprovantes: { orderBy: { criadoEm: 'asc' } },
+          dataEncomenda: true,
+          usuario: true,
+          itens: {
+            include: {
+              produto: true,
+              variedade: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
+
+    await this.apagarArquivosDeComprovante(
+      substituidos.map((c) => c.url),
+      'substituído',
+    );
 
     // Notificar administradores sobre o novo comprovante
     try {
@@ -1147,24 +1246,49 @@ export class OrdersService {
       );
     }
 
-    const updatedOrder = await this.prisma.pedidoEncomenda.update({
-      where: { id },
-      data: {
-        statusPagamento: 'confirmado',
-        statusPagamentoAnterior: order.statusPagamento,
-        dataPagamento: new Date(),
-        confirmadoPor: adminUserId,
-      },
-      include: {
-        dataEncomenda: true,
-        itens: {
-          include: {
-            produto: true,
-            variedade: true,
+    // Os comprovantes em análise passam a valer; o que entrou além do total
+    // vira reembolso (docs/PAGAMENTO-DIFERENCA-PIX.md).
+    const emAnalise = await this.prisma.comprovantePedido.findMany({
+      where: { pedidoEncomendaId: id, status: 'em_analise' },
+      select: { valor: true },
+    });
+    const reembolso = reembolsoNaConfirmacao(
+      order,
+      emAnalise.map((c) => c.valor),
+    );
+
+    const [, updatedOrder] = await this.prisma.$transaction([
+      this.prisma.comprovantePedido.updateMany({
+        where: { pedidoEncomendaId: id, status: 'em_analise' },
+        data: { status: 'confirmado' },
+      }),
+      this.prisma.pedidoEncomenda.update({
+        where: { id },
+        data: {
+          statusPagamento: 'confirmado',
+          statusPagamentoAnterior: order.statusPagamento,
+          dataPagamento: new Date(),
+          confirmadoPor: adminUserId,
+          ...(reembolso > 0
+            ? {
+                reembolsoValor: reembolso,
+                reembolsadoEm: null,
+                reembolsadoPor: null,
+              }
+            : {}),
+        },
+        include: {
+          comprovantes: { orderBy: { criadoEm: 'asc' } },
+          dataEncomenda: true,
+          itens: {
+            include: {
+              produto: true,
+              variedade: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
     // Notificar o usuário sobre a confirmação do pagamento
     try {
@@ -1190,18 +1314,39 @@ export class OrdersService {
   async revertPayment(id: number, adminUserId: string) {
     const order = await this.prisma.pedidoEncomenda.findUnique({
       where: { id },
+      include: { dataEncomenda: true },
     });
 
     if (!order) {
       throw new NotFoundException(`Pedido com ID ${id} não encontrado`);
     }
 
-    // When reverting, if it was 'confirmado', it should go back to 'aguardando_confirmacao'
-    // if there's a receipt, otherwise use the previous status or pendente.
     let targetStatus = order.statusPagamentoAnterior || 'pendente';
 
+    // Pagamento confirmado com comprovante. Com o formulário aberto, volta para
+    // `pendente`: é o único status que libera a edição (`update()`), e antes o
+    // pedido caía em `aguardando_confirmacao` e o cliente ficava sem poder
+    // editar até o prazo acabar (pedido 222, 2026-09-11). O comprovante fica
+    // anexado; o cliente reenvia se o total mudar. Com o prazo encerrado não há
+    // edição a liberar, então volta para análise, onde o admin reconfirma.
+    //
+    // Ao liberar a edição, o valor confirmado vira `valor_pago`: é a base do QR
+    // da diferença. Um reembolso ainda não feito entra nele — o dinheiro continua
+    // com o restaurante — e é zerado (docs/PAGAMENTO-DIFERENCA-PIX.md).
+    let pagamentoAnterior: Prisma.PedidoEncomendaUpdateInput = {};
+
     if (order.statusPagamento === 'confirmado' && order.comprovanteUrl) {
-      targetStatus = 'aguardando_confirmacao';
+      const formularioAberto =
+        new Date() <= new Date(order.dataEncomenda.dataLimitePedido);
+      targetStatus = formularioAberto ? 'pendente' : 'aguardando_confirmacao';
+      if (formularioAberto) {
+        pagamentoAnterior = {
+          valorPago: valorPagoNoRevert(order),
+          reembolsoValor: null,
+          reembolsadoEm: null,
+          reembolsadoPor: null,
+        };
+      }
     }
 
     const updatedOrder = await this.prisma.pedidoEncomenda.update({
@@ -1210,6 +1355,7 @@ export class OrdersService {
         statusPagamento: targetStatus,
         statusPagamentoAnterior: order.statusPagamento,
         dataPagamento: null,
+        ...pagamentoAnterior,
       },
       include: {
         dataEncomenda: true,
@@ -1258,17 +1404,41 @@ export class OrdersService {
       );
     }
 
-    if (order.comprovanteUrl) {
-      try {
-        const oldPath = this.storageService.extractPathFromUrl(
-          order.comprovanteUrl,
-          'comprovantes',
-        );
-        if (oldPath)
-          await this.storageService.deleteFile('comprovantes', [oldPath]);
-      } catch (err) {
-        console.error('Erro ao deletar comprovante recusado:', err);
-      }
+    // Recusa só o que está em análise. Comprovantes confirmados são pagamento
+    // válido e ficam (docs/PAGAMENTO-DIFERENCA-PIX.md).
+    const [emAnalise, ultimoConfirmado] = await Promise.all([
+      this.prisma.comprovantePedido.findMany({
+        where: { pedidoEncomendaId: id, status: 'em_analise' },
+        select: { id: true, url: true },
+      }),
+      this.prisma.comprovantePedido.findFirst({
+        where: { pedidoEncomendaId: id, status: 'confirmado' },
+        orderBy: { criadoEm: 'desc' },
+        select: { url: true },
+      }),
+    ]);
+
+    // Pedido em análise só porque o pagamento anterior já cobre o total: não há
+    // comprovante novo, e recusar o devolveria a pendente cobrando de novo.
+    if (emAnalise.length === 0 && ultimoConfirmado) {
+      throw new BadRequestException(
+        'Não há comprovante em análise para recusar neste pedido',
+      );
+    }
+
+    // Sem histórico nenhum (pedido anterior à tabela de comprovantes), o
+    // comprovante só existe no próprio pedido — o comportamento de antes.
+    const recusados =
+      emAnalise.length > 0
+        ? emAnalise.map((c) => c.url)
+        : order.comprovanteUrl
+          ? [order.comprovanteUrl]
+          : [];
+    await this.apagarArquivosDeComprovante(recusados, 'recusado');
+    if (emAnalise.length > 0) {
+      await this.prisma.comprovantePedido.deleteMany({
+        where: { id: { in: emAnalise.map((c) => c.id) } },
+      });
     }
 
     const updatedOrder = await this.prisma.pedidoEncomenda.update({
@@ -1276,7 +1446,7 @@ export class OrdersService {
       data: {
         statusPagamento: 'pendente',
         statusPagamentoAnterior: order.statusPagamento,
-        comprovanteUrl: null, // Clear receipt URL
+        comprovanteUrl: ultimoConfirmado?.url ?? null,
       },
       include: {
         dataEncomenda: true,
@@ -1642,19 +1812,85 @@ export class OrdersService {
       );
     }
 
-    const pix = QrCodePix({
-      version: '01',
-      key: config.chavePix,
-      name: config.nomeRecebedor || 'Yatsunami',
-      city: config.cidadeRecebedor || 'Curitiba',
-      transactionId: `PAY${order.id}`,
-      message: `Pedido #${order.id}`,
-      value: Number(order.totalValor),
-    });
+    const situacao = situacaoDoPagamento(order);
+    if (situacao.temPagamentoAnterior && situacao.aPagar === 0) {
+      throw new BadRequestException(
+        'O pagamento anterior já cobre este pedido',
+      );
+    }
+
+    const chavePix = config.chavePix;
+    const gerar = async (valor: number, sufixo: string) => {
+      const pix = QrCodePix({
+        version: '01',
+        key: chavePix,
+        name: config.nomeRecebedor || 'Yatsunami',
+        city: config.cidadeRecebedor || 'Curitiba',
+        transactionId: `PAY${order.id}${sufixo}`,
+        message: `Pedido #${order.id}`,
+        value: valor,
+      });
+      return { valor, payload: pix.payload(), base64: await pix.base64() };
+    };
+
+    const total = await gerar(situacao.total, '');
+    const diferenca = situacao.temPagamentoAnterior
+      ? await gerar(situacao.aPagar, 'D')
+      : null;
+    // Com pagamento anterior o padrão é a diferença. `payload` e `base64` de
+    // topo seguem o padrão porque os apps antigos só leem esses dois campos.
+    const padrao = diferenca ?? total;
 
     return {
-      payload: pix.payload(),
-      base64: await pix.base64(),
+      payload: padrao.payload,
+      base64: padrao.base64,
+      total,
+      diferenca,
+      valorPago: situacao.temPagamentoAnterior ? situacao.pago : null,
     };
+  }
+
+  /** Marca como feito o reembolso do que o cliente pagou além do total. */
+  async marcarReembolsado(id: number, adminUserId: string) {
+    const order = await this.prisma.pedidoEncomenda.findUnique({
+      where: { id },
+      select: { reembolsoValor: true, reembolsadoEm: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Pedido com ID ${id} não encontrado`);
+    }
+    if (!order.reembolsoValor || Number(order.reembolsoValor) <= 0) {
+      throw new BadRequestException('Este pedido não tem reembolso pendente');
+    }
+    if (order.reembolsadoEm) {
+      throw new BadRequestException('O reembolso deste pedido já foi marcado');
+    }
+
+    return this.prisma.pedidoEncomenda.update({
+      where: { id },
+      data: { reembolsadoEm: new Date(), reembolsadoPor: adminUserId },
+      include: {
+        comprovantes: { orderBy: { criadoEm: 'asc' } },
+        dataEncomenda: true,
+        itens: { include: { produto: true, variedade: true } },
+      },
+    });
+  }
+
+  /** Apaga arquivos de comprovante do storage; falha aqui não desfaz a operação. */
+  private async apagarArquivosDeComprovante(urls: string[], motivo: string) {
+    for (const url of urls) {
+      try {
+        const caminho = this.storageService.extractPathFromUrl(
+          url,
+          'comprovantes',
+        );
+        if (caminho)
+          await this.storageService.deleteFile('comprovantes', [caminho]);
+      } catch (err) {
+        console.error(`Erro ao deletar comprovante ${motivo}:`, err);
+      }
+    }
   }
 }

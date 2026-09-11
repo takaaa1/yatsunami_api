@@ -19,6 +19,11 @@ const notificationStrings: Record<
       message:
         'O usuário {{userName}} enviou um comprovante para o pedido #{{orderCode}}.',
     },
+    'notification.paymentCoveredAwaiting': {
+      title: '🧾 Pedido pago foi alterado',
+      message:
+        'O usuário {{userName}} alterou o pedido #{{orderCode}}, que já estava pago. O valor pago cobre o novo total: confirme o pagamento e verifique se há reembolso.',
+    },
     'notification.paymentConfirmed': {
       title: '✅ Pagamento Confirmado',
       message: 'Seu pagamento para o pedido #{{orderCode}} foi confirmado!',
@@ -89,6 +94,11 @@ const notificationStrings: Record<
     'notification.receiptReceived': {
       title: '🧾 領収書受信',
       message: '{{userName}}さんが注文 #{{orderCode}} の領収書を送信しました。',
+    },
+    'notification.paymentCoveredAwaiting': {
+      title: '🧾 支払い済み注文の変更',
+      message:
+        '{{userName}}さんが支払い済みの注文 #{{orderCode}} を変更しました。支払い済みの金額で新しい合計をまかなえます。支払いを確認し、返金の有無をご確認ください。',
     },
     'notification.paymentConfirmed': {
       title: '✅ 支払い確認済み',

@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, UpdateOrderDto } from './dto';
+import { CreateOrderDto, UpdateOrderDto, UploadReceiptDto } from './dto';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -173,6 +173,12 @@ export class OrdersController {
           type: 'string',
           format: 'binary',
         },
+        tipo: {
+          type: 'string',
+          enum: ['diferenca', 'total'],
+          description:
+            'Com pagamento anterior: qual QR foi pago. Ausente vale diferença.',
+        },
       },
     },
   })
@@ -184,10 +190,11 @@ export class OrdersController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('id') userId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UploadReceiptDto,
   ) {
     return this.comBroadcast(
       'UPDATE',
-      this.ordersService.updateReceipt(id, userId, file),
+      this.ordersService.updateReceipt(id, userId, file, dto.tipo),
     );
   }
 
@@ -223,6 +230,23 @@ export class OrdersController {
     return this.comBroadcast(
       'UPDATE',
       this.ordersService.revertPayment(id, adminUserId),
+    );
+  }
+
+  @Post(':id/refund-done')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Marcar reembolso da diferença como feito (Admin)' })
+  @ApiResponse({ status: 200, description: 'Reembolso marcado' })
+  @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
+  @ApiResponse({ status: 400, description: 'Sem reembolso pendente' })
+  marcarReembolsado(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('id') adminUserId: string,
+  ) {
+    return this.comBroadcast(
+      'UPDATE',
+      this.ordersService.marcarReembolsado(id, adminUserId),
     );
   }
 
