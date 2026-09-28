@@ -61,27 +61,31 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger setup
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Yatsunami API')
-    .setDescription(
-      'API do sistema Yatsunami — gerenciamento de restaurante japonês',
-    )
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Token JWT obtido via POST /api/auth/login',
-      },
-      'JWT',
-    )
-    .addServer(configService.get<string>('apiUrl') || 'http://localhost:3000')
-    .build();
+  // O catálogo lista rotas administrativas. Fica disponível em desenvolvimento
+  // e some quando NODE_ENV=production.
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Yatsunami API')
+      .setDescription(
+        'API do sistema Yatsunami — gerenciamento de restaurante japonês',
+      )
+      .setVersion('1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Token JWT obtido via POST /api/auth/login',
+        },
+        'JWT',
+      )
+      .addServer(configService.get<string>('apiUrl') || 'http://localhost:3000')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+    logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);
+  }
 
   await app.listen(port);
 
@@ -90,7 +94,6 @@ async function bootstrap() {
   );
   logger.log(`🚀 Yatsunami API running on http://localhost:${port}`);
   logger.log(`📚 API endpoints available at http://localhost:${port}/api`);
-  logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);
 }
 
 void bootstrap();
