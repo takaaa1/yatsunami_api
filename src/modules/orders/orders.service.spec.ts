@@ -756,5 +756,65 @@ describe('OrdersService (perf Fase 2)', () => {
         expect(await mover(222)).toBeNull();
       });
     });
+
+    describe('conclusão da retirada', () => {
+      const retirada = (extra: Record<string, unknown> = {}) => ({
+        id: 225,
+        tipoEntrega: 'retirada',
+        statusPagamento: 'confirmado',
+        dataPagamento: new Date('2026-09-17T15:00:00.000Z'),
+        comprovanteUrl: null,
+        dataEncomenda: { concluido: false },
+        ...extra,
+      });
+
+      beforeEach(() => {
+        mockPrisma.pedidoEncomenda.update.mockResolvedValue({ id: 225 });
+      });
+
+      it('marca a retirada confirmada como entregue', async () => {
+        mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(retirada());
+
+        await service.completePickup(225);
+
+        expect(mockPrisma.pedidoEncomenda.update).toHaveBeenCalledWith({
+          where: { id: 225 },
+          data: { statusPagamento: 'entregue', emEntrega: false },
+        });
+      });
+
+      it('recusa pedido de entrega, que se conclui na rota', async () => {
+        mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(
+          retirada({ tipoEntrega: 'entrega' }),
+        );
+
+        await expect(service.completePickup(225)).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('recusa retirada sem pagamento confirmado', async () => {
+        mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(
+          retirada({ statusPagamento: 'pendente', dataPagamento: null }),
+        );
+
+        await expect(service.completePickup(225)).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('reverter devolve a retirada para confirmado', async () => {
+        mockPrisma.pedidoEncomenda.findUnique.mockResolvedValue(
+          retirada({ statusPagamento: 'entregue' }),
+        );
+
+        await service.revertPickup(225);
+
+        expect(mockPrisma.pedidoEncomenda.update).toHaveBeenCalledWith({
+          where: { id: 225 },
+          data: { statusPagamento: 'confirmado', emEntrega: false },
+        });
+      });
+    });
   });
 });

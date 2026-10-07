@@ -44,12 +44,17 @@ describe('OrderFormsService — concluir e reabrir', () => {
   let service: OrderFormsService;
   let prisma: {
     dataEncomenda: { findUnique: jest.Mock; update: jest.Mock };
-    pedidoEncomenda: { findMany: jest.Mock; updateMany: jest.Mock };
+    pedidoEncomenda: {
+      findMany: jest.Mock;
+      updateMany: jest.Mock;
+      update: jest.Mock;
+    };
     venda: { deleteMany: jest.Mock };
     produtoEncomenda: { deleteMany: jest.Mock; createMany: jest.Mock };
     $executeRawUnsafe: jest.Mock;
   };
   let backgroundJobService: { fireAndForget: jest.Mock };
+  let salesService: { create: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -60,6 +65,7 @@ describe('OrderFormsService — concluir e reabrir', () => {
       pedidoEncomenda: {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        update: jest.fn().mockResolvedValue({}),
       },
       venda: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       produtoEncomenda: {
@@ -69,12 +75,13 @@ describe('OrderFormsService — concluir e reabrir', () => {
       $executeRawUnsafe: jest.fn().mockResolvedValue(0),
     };
     backgroundJobService = { fireAndForget: jest.fn() };
+    salesService = { create: jest.fn().mockResolvedValue({ id: 355 }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderFormsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SalesService, useValue: {} },
+        { provide: SalesService, useValue: salesService },
         { provide: NotificationsService, useValue: {} },
         { provide: BackgroundJobService, useValue: backgroundJobService },
         { provide: CronLockService, useValue: { enabled: () => false } },
@@ -154,6 +161,32 @@ describe('OrderFormsService — concluir e reabrir', () => {
       expect(backgroundJobService.fireAndForget).toHaveBeenCalledWith(
         'form-close-sales-7',
         expect.any(Function),
+      );
+    });
+
+    it('lança retirada sem horário no dia do formulário', async () => {
+      prisma.pedidoEncomenda.findMany.mockResolvedValue([
+        {
+          id: 225,
+          usuarioId: 'u-antonio',
+          codigo: 'ODO4FB',
+          taxaEntrega: 0,
+          horarioEstimadoEntrega: null,
+          itens: [],
+        },
+      ]);
+      backgroundJobService.fireAndForget.mockImplementation((_name, fn) =>
+        fn(),
+      );
+
+      await service.update(7, { concluido: true });
+
+      expect(salesService.create).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({
+          usuarioId: 'u-antonio',
+          data: new Date('2026-09-01T15:00:00.000Z'),
+        }),
       );
     });
   });

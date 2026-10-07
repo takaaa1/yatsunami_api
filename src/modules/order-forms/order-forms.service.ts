@@ -13,6 +13,7 @@ import {
   isBackgroundJobRuntime,
 } from '../../common/runtime/runtime.config';
 import { diaDeCalendario } from '../../common/utils/datas';
+import { dataDaVendaDoFormulario } from './sale-date';
 
 @Injectable()
 export class OrderFormsService {
@@ -457,6 +458,12 @@ export class OrderFormsService {
   }
 
   private async createSalesForClosedForm(id: number, adminUserId?: string) {
+    const orderForm = await this.prisma.dataEncomenda.findUnique({
+      where: { id },
+      select: { dataEntrega: true },
+    });
+    if (!orderForm) return;
+
     const orders = await this.prisma.pedidoEncomenda.findMany({
       where: {
         dataEncomendaId: id,
@@ -494,7 +501,10 @@ export class OrderFormsService {
               ? `Formulário #${id} - Pedido ${order.codigo || order.id} | Taxa de entrega: R$ ${deliveryFee.toFixed(2).replace('.', ',')}`
               : `Formulário #${id} - Pedido ${order.codigo || order.id}`,
           taxaEntrega: deliveryFee > 0 ? deliveryFee : undefined,
-          data: order.horarioEstimadoEntrega ?? undefined,
+          data: dataDaVendaDoFormulario(
+            order.horarioEstimadoEntrega,
+            orderForm.dataEntrega,
+          ),
           itens: order.itens.map((item) => ({
             produtoId: item.produtoId,
             variedadeId: item.variedadeId || undefined,

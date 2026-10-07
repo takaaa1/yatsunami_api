@@ -1225,6 +1225,81 @@ export class OrdersService {
     return updatedOrder;
   }
 
+  /**
+   * Retirada não entra na rota, então o botão "Concluir" de lá nunca aparece.
+   * O efeito é o mesmo da parada: o pedido passa a `entregue`.
+   */
+  async completePickup(id: number) {
+    const order = await this.prisma.pedidoEncomenda.findUnique({
+      where: { id },
+      include: { dataEncomenda: { select: { concluido: true } } },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Pedido com ID ${id} não encontrado`);
+    }
+
+    this.exigirRetiradaAberta(order);
+
+    if (order.statusPagamento === 'entregue') {
+      throw new BadRequestException('Esta retirada já foi concluída');
+    }
+
+    if (order.statusPagamento !== 'confirmado') {
+      throw new BadRequestException(
+        'Confirme o pagamento antes de concluir a retirada',
+      );
+    }
+
+    return this.prisma.pedidoEncomenda.update({
+      where: { id },
+      data: { statusPagamento: 'entregue', emEntrega: false },
+    });
+  }
+
+  async revertPickup(id: number) {
+    const order = await this.prisma.pedidoEncomenda.findUnique({
+      where: { id },
+      include: { dataEncomenda: { select: { concluido: true } } },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Pedido com ID ${id} não encontrado`);
+    }
+
+    this.exigirRetiradaAberta(order);
+
+    if (order.statusPagamento !== 'entregue') {
+      throw new BadRequestException('Esta retirada não está concluída');
+    }
+
+    const statusPagamento = order.dataPagamento
+      ? 'confirmado'
+      : order.comprovanteUrl
+        ? 'aguardando_confirmacao'
+        : 'pendente';
+
+    return this.prisma.pedidoEncomenda.update({
+      where: { id },
+      data: { statusPagamento, emEntrega: false },
+    });
+  }
+
+  private exigirRetiradaAberta(order: {
+    tipoEntrega: string | null;
+    dataEncomenda: { concluido: boolean } | null;
+  }) {
+    if (order.tipoEntrega !== 'retirada' && order.tipoEntrega !== 'pickup') {
+      throw new BadRequestException(
+        'Só um pedido de retirada pode ser concluído fora da rota',
+      );
+    }
+
+    if (order.dataEncomenda?.concluido) {
+      throw new BadRequestException('O formulário já foi concluído');
+    }
+  }
+
   // Admin methods for payment management
   async confirmPayment(id: number, adminUserId: string) {
     const order = await this.prisma.pedidoEncomenda.findUnique({

@@ -1,4 +1,4 @@
-import { DeliveryService } from './delivery.service';
+import { DeliveryService, filtroLimparEtaDaRota } from './delivery.service';
 
 /**
  * Regressões do incidente de rastreio:
@@ -435,6 +435,23 @@ describe('DeliveryService — rastreio de entrega', () => {
         where: { id: 101 },
         data: { statusPagamento: 'confirmado', emEntrega: false },
       });
+    });
+  });
+
+  describe('deleteRoute', () => {
+    it('limpa o ETA das entregas e preserva o horário da retirada', async () => {
+      prisma.rotaEntrega.delete = jest.fn().mockResolvedValue({ formId: 10 });
+
+      await service.deleteRoute(10);
+
+      expect(prisma.pedidoEncomenda.updateMany).toHaveBeenCalledWith({
+        where: filtroLimparEtaDaRota(10),
+        data: { horarioEstimadoEntrega: null },
+      });
+      expect(filtroLimparEtaDaRota(10).OR).toEqual([
+        { tipoEntrega: null },
+        { tipoEntrega: { notIn: ['retirada', 'pickup'] } },
+      ]);
     });
   });
 });

@@ -284,6 +284,28 @@ export class OrdersController {
     );
   }
 
+  @Post(':id/complete-pickup')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Concluir retirada na loja (Admin)' })
+  @ApiResponse({ status: 200, description: 'Retirada concluída' })
+  @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
+  @ApiResponse({ status: 400, description: 'Pedido não é retirada ou pagamento pendente' })
+  completePickup(@Param('id', ParseIntPipe) id: number) {
+    return this.comBroadcast('UPDATE', this.ordersService.completePickup(id));
+  }
+
+  @Post(':id/revert-pickup')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Reverter conclusão da retirada (Admin)' })
+  @ApiResponse({ status: 200, description: 'Conclusão da retirada revertida' })
+  @ApiResponse({ status: 404, description: 'Pedido não encontrado' })
+  @ApiResponse({ status: 400, description: 'Operação inválida' })
+  revertPickup(@Param('id', ParseIntPipe) id: number) {
+    return this.comBroadcast('UPDATE', this.ordersService.revertPickup(id));
+  }
+
   @Post(':id/revert-cancellation')
   @UseGuards(RolesGuard)
   @Roles('admin')

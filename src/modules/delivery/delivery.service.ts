@@ -27,6 +27,23 @@ import {
   stopOrderIds,
 } from './route-stop.types';
 
+/**
+ * A rota recalcula o ETA das entregas. Retirada não entra na rota e guarda,
+ * neste mesmo campo, o horário que o cliente escolheu. Apagar a coluna inteira
+ * fazia a venda da retirada nascer com `now()` na conclusão do formulário.
+ */
+export function filtroLimparEtaDaRota(
+  formId: number,
+): Prisma.PedidoEncomendaWhereInput {
+  return {
+    dataEncomendaId: formId,
+    OR: [
+      { tipoEntrega: null },
+      { tipoEntrega: { notIn: ['retirada', 'pickup'] } },
+    ],
+  };
+}
+
 @Injectable()
 export class DeliveryService {
   private readonly logger = new Logger(DeliveryService.name);
@@ -299,9 +316,10 @@ export class DeliveryService {
     const allRoutesData: RouteStop[] = [];
     const allLinks: { courierId: number; url: string; label: string }[] = [];
 
-    // Remove existing arrival times for this form to avoid stale data
+    // Remove existing arrival times for this form to avoid stale data.
+    // Retirada fica de fora: o horário de busca não é ETA de rota.
     await this.prisma.pedidoEncomenda.updateMany({
-      where: { dataEncomendaId: formId },
+      where: filtroLimparEtaDaRota(formId),
       data: { horarioEstimadoEntrega: null },
     });
 
@@ -672,9 +690,10 @@ export class DeliveryService {
   }
 
   async deleteRoute(formId: number) {
-    // Clear arrival times from orders before deleting route
+    // Clear arrival times from orders before deleting route.
+    // Retirada fica de fora: o horário de busca não é ETA de rota.
     await this.prisma.pedidoEncomenda.updateMany({
-      where: { dataEncomendaId: formId },
+      where: filtroLimparEtaDaRota(formId),
       data: { horarioEstimadoEntrega: null },
     });
 
