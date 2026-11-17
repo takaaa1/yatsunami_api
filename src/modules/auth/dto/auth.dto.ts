@@ -20,6 +20,13 @@ export class LoginDto {
     @IsOptional()
     @IsBoolean()
     rememberMe?: boolean;
+
+    @ApiPropertyOptional({
+      description: 'Cliente capaz de renovar a sessão. Ausente = JWT legado, sem refresh.',
+    })
+    @IsOptional()
+    @IsBoolean()
+    sessaoRenovavel?: boolean;
 }
 
 export class RegisterDto {
@@ -54,6 +61,13 @@ export class RegisterDto {
     @Sanitized('plain')
     @IsString()
     idioma: string;
+
+    @ApiPropertyOptional({
+      description: 'Cliente capaz de renovar a sessão. Ausente = JWT legado, sem refresh.',
+    })
+    @IsOptional()
+    @IsBoolean()
+    sessaoRenovavel?: boolean;
 }
 
 export class ChangePasswordDto {
@@ -213,6 +227,16 @@ export class AuthResponseDto {
     @ApiPropertyOptional({ example: 'dGhpcyBpcyBhIHJl...', description: 'Refresh token' })
     refreshToken?: string;
 
+    @ApiPropertyOptional({ description: 'Instante em que o refresh token deixa de valer' })
+    refreshExpiresAt?: string;
+
     @ApiProperty({ type: UserResponseDto })
     user: UserResponseDto;
+}
+
+export class RefreshTokenDto {
+    @ApiProperty({ description: 'Refresh token no formato <sessionId>.<segredo>' })
+    @IsString()
+    @MinLength(10)
+    refreshToken: string;
 }

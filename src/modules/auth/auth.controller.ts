@@ -31,6 +31,7 @@ import {
   ResetPasswordDto,
   AuthResponseDto,
   UserResponseDto,
+  RefreshTokenDto,
 } from './dto';
 import { CurrentUser, Public } from '../../common/decorators';
 
@@ -114,18 +115,23 @@ export class AuthController {
     return this.authService.changePassword(userId, changePasswordDto);
   }
 
-  @UseGuards(AuthGuard('jwt'))
-  @ApiBearerAuth('JWT')
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Renovar token de acesso' })
-  @ApiResponse({ status: 200, description: 'Token renovado' })
-  @ApiResponse({ status: 401, description: 'Não autorizado' })
-  async refresh(@CurrentUser('id') userId: string) {
-    // With Supabase Auth, token refresh is handled client-side.
-    // This endpoint validates the current token and returns user info.
-    const user = await this.authService.getProfile(userId);
-    return { user };
+  @ApiOperation({ summary: 'Renovar sessão (refresh token rotativo)' })
+  @ApiResponse({ status: 200, description: 'Sessão renovada', type: AuthResponseDto })
+  @ApiResponse({ status: 401, description: 'Sessão inválida ou expirada' })
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
+  }
+
+  @Public()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Encerrar a sessão deste dispositivo' })
+  @ApiResponse({ status: 200, description: 'Sessão encerrada' })
+  async logout(@Body() dto: RefreshTokenDto) {
+    return this.authService.logout(dto.refreshToken);
   }
 
   @UseGuards(AuthGuard('jwt'))

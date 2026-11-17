@@ -11,6 +11,7 @@ jest.mock('bcrypt', () => ({
 
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
+import { AuthSessionService } from './session/auth-session.service';
 import { PrismaService } from '../../prisma';
 import { MailService } from '../../common/services/mail.service';
 import { StorageService } from '../../config/storage.service';
@@ -51,7 +52,7 @@ const mockMailService = {
 };
 
 const mockConfigService = {
-    get: jest.fn().mockReturnValue(15),
+    get: jest.fn((key: string) => (key === 'session.accessTokenTtlSeconds' ? 3600 : 15)),
 };
 
 const mockJwtService = {
@@ -65,6 +66,12 @@ const mockStorageService = {
     getPublicUrl: jest.fn(),
 };
 
+const mockAuthSession = {
+    create: jest.fn(),
+    rotate: jest.fn(),
+    revokeFamilyByToken: jest.fn().mockResolvedValue(undefined),
+    revokeAllForUser: jest.fn().mockResolvedValue(undefined),
+};
 const mockNotificationsService = {
     createAndSendNotification: jest.fn().mockResolvedValue(undefined),
 };
@@ -82,6 +89,7 @@ describe('AuthService', () => {
                 { provide: ConfigService, useValue: mockConfigService },
                 { provide: StorageService, useValue: mockStorageService },
                 { provide: NotificationsService, useValue: mockNotificationsService },
+                { provide: AuthSessionService, useValue: mockAuthSession },
             ],
         }).compile();
 
@@ -148,4 +156,65 @@ describe('AuthService', () => {
             );
         });
     });
+        it('com sessaoRenovavel cria sessão e devolve refresh token', async () => {
+            mockPrisma.usuario.findUnique.mockResolvedValue(mockUser);
+            (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+            mockAuthSession.create.mockResolvedValue({
+                sessionId: 'sess-1',
+                refreshToken: 'sess-1.segredo',
+                refreshExpiresAt: new Date('2026-12-16T12:00:00.000Z'),
+            });
+            const result = await service.login({
+                email: 'joao@test.com',
+                password: 'senha123',
+                rememberMe: true,
+                sessaoRenovavel: true,
+            });
+            expect(mockAuthSession.create).toHaveBeenCalledWith({
+                userId: 'uuid-1',
+                rememberMe: true,
+            });
+            expect(result.refreshToken).toBe('sess-1.segredo');
+            expect(mockJwtService.sign).toHaveBeenCalledWith(
+                expect.objectContaining({ sid: 'sess-1' }),
+                expect.objectContaining({ expiresIn: 3600 }),
+            );
+        });
+
+        it('sem sessaoRenovavel não cria sessão', async () => {
+            mockPrisma.usuario.findUnique.mockResolvedValue(mockUser);
+            (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+            await service.login({ email: 'joao@test.com', password: 'senha123' });
+            expect(mockAuthSession.create).not.toHaveBeenCalled();
+        });
+
+    describe('refresh', () => {
+        it('rotaciona e devolve outro par de tokens', async () => {
+            mockAuthSession.rotate.mockResolvedValue({
+                userId: 'uuid-1',
+                rememberMe: true,
+                sessionId: 'sess-2',
+                refreshToken: 'sess-2.segredo',
+                refreshExpiresAt: new Date('2026-12-16T12:00:00.000Z'),
+            });
+            mockPrisma.usuario.findUnique.mockResolvedValue(mockUser);
+            const result = await service.refresh('sess-1.segredo');
+            expect(result.refreshToken).toBe('sess-2.segredo');
+            expect(result.accessToken).toBe('mock-jwt-token');
+        });
+
+        it('usuário inativo revoga as sessões e responde 401', async () => {
+            mockAuthSession.rotate.mockResolvedValue({
+                userId: 'uuid-1',
+                rememberMe: true,
+                sessionId: 'sess-2',
+                refreshToken: 'sess-2.segredo',
+                refreshExpiresAt: new Date('2026-12-16T12:00:00.000Z'),
+            });
+            mockPrisma.usuario.findUnique.mockResolvedValue({ ...mockUser, ativo: false });
+            await expect(service.refresh('sess-1.segredo')).rejects.toThrow(UnauthorizedException);
+            expect(mockAuthSession.revokeAllForUser).toHaveBeenCalledWith('uuid-1');
+        });
+    });
+
 });

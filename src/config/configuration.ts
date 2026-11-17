@@ -29,6 +29,19 @@ export default () => ({
     expiration: process.env.JWT_EXPIRES_IN || '7d',
   },
 
+  /**
+   * Sessão renovável. O access token curto só é emitido quando o cliente
+   * envia `sessaoRenovavel`; builds antigos continuam no JWT de `JWT_EXPIRES_IN`.
+   */
+  session: {
+    accessTokenTtlSeconds: parseInt(process.env.ACCESS_TOKEN_TTL_SECONDS || '3600', 10),
+    rememberIdleDays: parseInt(process.env.SESSION_REMEMBER_IDLE_DAYS || '90', 10),
+    rememberAbsoluteDays: parseInt(process.env.SESSION_REMEMBER_ABSOLUTE_DAYS || '365', 10),
+    ephemeralIdleHours: parseInt(process.env.SESSION_EPHEMERAL_IDLE_HOURS || '24', 10),
+    ephemeralAbsoluteDays: parseInt(process.env.SESSION_EPHEMERAL_ABSOLUTE_DAYS || '7', 10),
+    reuseGraceSeconds: parseInt(process.env.SESSION_REUSE_GRACE_SECONDS || '30', 10),
+  },
+
   company: {
     name: process.env.COMPANY_NAME || 'Yatsunami',
     city: process.env.COMPANY_CITY || 'Curitiba',

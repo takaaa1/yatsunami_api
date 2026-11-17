@@ -7,6 +7,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuthSessionService } from './session/auth-session.service';
+import { AuthSessionCleanupCron } from './session/auth-session-cleanup.cron';
 
 @Module({
   imports: [
@@ -29,7 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, AuthSessionService, AuthSessionCleanupCron],
   exports: [AuthService, JwtStrategy, JwtModule],
 })
 export class AuthModule {}

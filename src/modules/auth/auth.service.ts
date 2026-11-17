@@ -24,6 +24,7 @@ import {
 import { MailService } from '../../common/services/mail.service';
 import { StorageService } from '../../config/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuthSessionService } from './session/auth-session.service';
 import {
   imageUploadFileName,
   uploadContentType,
@@ -43,6 +44,7 @@ export class AuthService {
     private mailService: MailService,
     private storageService: StorageService,
     private notificationsService: NotificationsService,
+    private authSessions: AuthSessionService,
   ) {}
 
   private async notifyAdminsNewUser(user: {
@@ -84,6 +86,63 @@ export class AuthService {
       email: user.email,
       role: user.role,
     });
+  }
+
+  private toAuthUser(user: {
+    id: string;
+    nome: string;
+    email: string;
+    role: string;
+    tema: string;
+    idioma: string;
+    avatarUrl: string | null;
+  }) {
+    return {
+      id: user.id,
+      nome: user.nome,
+      email: user.email,
+      role: user.role,
+      tema: user.tema,
+      idioma: user.idioma,
+      avatarUrl: user.avatarUrl,
+    };
+  }
+
+  private accessTtlSeconds(): number {
+    const raw = Number(this.configService.get('session.accessTokenTtlSeconds'));
+    return Number.isFinite(raw) && raw > 0 ? raw : 3600;
+  }
+
+  private async issueSession(
+    user: {
+      id: string;
+      nome: string;
+      email: string;
+      role: string;
+      tema: string;
+      idioma: string;
+      avatarUrl: string | null;
+    },
+    rememberMe: boolean,
+  ): Promise<AuthResponseDto> {
+    const issued = await this.authSessions.create({
+      userId: user.id,
+      rememberMe,
+    });
+    return {
+      accessToken: this.jwtService.sign(
+        {
+          sub: user.id,
+          email: user.email,
+          role: user.role,
+          sid: issued.sessionId,
+        },
+        { expiresIn: this.accessTtlSeconds() },
+      ),
+      refreshToken: issued.refreshToken,
+      refreshExpiresAt: issued.refreshExpiresAt.toISOString(),
+      user: this.toAuthUser(user),
+    };
   }
 
   // ─── Password cascade ─────────────────────────────────────────────────────
@@ -191,17 +250,13 @@ export class AuthService {
 
     this.logger.log(`User logged in: ${emailLower}`);
 
+    if (loginDto.sessaoRenovavel) {
+      return this.issueSession(user, loginDto.rememberMe === true);
+    }
+
     return {
       accessToken: this.generateToken(user),
-      user: {
-        id: user.id,
-        nome: user.nome,
-        email: user.email,
-        role: user.role,
-        tema: user.tema,
-        idioma: user.idioma,
-        avatarUrl: user.avatarUrl,
-      },
+      user: this.toAuthUser(user),
     };
   }
 
@@ -244,19 +299,47 @@ export class AuthService {
       this.logger.error(`Falha ao notificar admins do novo usuário: ${error}`),
     );
 
+    if (registerDto.sessaoRenovavel) {
+      return this.issueSession(user, true);
+    }
+
     return {
       accessToken: this.generateToken(user),
-      user: {
-        id: user.id,
-        nome: user.nome,
-        email: user.email,
-        role: user.role,
-        tema: user.tema,
-        idioma: user.idioma,
-        avatarUrl: user.avatarUrl,
-      },
+      user: this.toAuthUser(user),
     };
   }
+  async refresh(refreshToken: string): Promise<AuthResponseDto> {
+    const rotated = await this.authSessions.rotate(refreshToken);
+    const user = await this.prisma.usuario.findUnique({
+      where: { id: rotated.userId },
+    });
+    if (!user || !user.ativo) {
+      await this.authSessions.revokeAllForUser(rotated.userId);
+      throw new UnauthorizedException(
+        user ? 'Conta desativada. Entre em contato com o suporte.' : 'Sessão inválida ou expirada',
+      );
+    }
+    return {
+      accessToken: this.jwtService.sign(
+        {
+          sub: user.id,
+          email: user.email,
+          role: user.role,
+          sid: rotated.sessionId,
+        },
+        { expiresIn: this.accessTtlSeconds() },
+      ),
+      refreshToken: rotated.refreshToken,
+      refreshExpiresAt: rotated.refreshExpiresAt.toISOString(),
+      user: this.toAuthUser(user),
+    };
+  }
+
+  async logout(refreshToken: string): Promise<{ ok: true }> {
+    await this.authSessions.revokeFamilyByToken(refreshToken);
+    return { ok: true };
+  }
+
 
   async changePassword(
     userId: string,
