@@ -4,42 +4,53 @@ import { isCronEnabled } from '../runtime/runtime.config';
 
 @Injectable()
 export class CronLockService {
-    private readonly logger = new Logger(CronLockService.name);
+  private readonly logger = new Logger(CronLockService.name);
 
-    constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-    enabled(): boolean {
-        return isCronEnabled();
+  enabled(): boolean {
+    return isCronEnabled();
+  }
+
+  /**
+   * Roda `fn` só se esta instância conseguir o advisory lock `lockKey`.
+   *
+   * O lock é de **transação** e o trabalho roda dentro dela: o PostgreSQL o
+   * solta no commit/rollback, na mesma conexão em que foi pego. A versão
+   * anterior usava lock de sessão com unlock numa chamada solta — com pool de
+   * várias conexões, o unlock podia cair noutra sessão e o lock ficava preso,
+   * fazendo as outras instâncias pularem o job (code review 2026-11).
+   *
+   * A transação só segura o lock: o `fn` continua usando `this.prisma` (outras
+   * conexões do pool). Por isso ela fica aberta e ociosa enquanto o job roda,
+   * e o `timeout` precisa cobrir o job mais longo.
+   */
+  async withLock(
+    lockKey: number,
+    jobName: string,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    if (!this.enabled()) {
+      return;
     }
 
-    async withLock(lockKey: number, jobName: string, fn: () => Promise<void>): Promise<void> {
-        if (!this.enabled()) {
-            return;
+    await this.prisma.$transaction(
+      async (tx) => {
+        const rows = await tx.$queryRaw<{ adquirido: boolean }[]>`
+                    SELECT pg_try_advisory_xact_lock(${lockKey}::bigint) AS "adquirido"
+                `;
+        if (rows[0]?.adquirido !== true) {
+          this.logger.debug(
+            `Cron "${jobName}" skipped — advisory lock ${lockKey} held by another instance`,
+          );
+          return;
         }
-
-        const acquired = await this.tryAcquire(lockKey);
-        if (!acquired) {
-            this.logger.debug(`Cron "${jobName}" skipped — advisory lock ${lockKey} held by another instance`);
-            return;
-        }
-
-        try {
-            await fn();
-        } finally {
-            await this.release(lockKey);
-        }
-    }
-
-    private async tryAcquire(lockKey: number): Promise<boolean> {
-        const rows = await this.prisma.$queryRaw<{ pg_try_advisory_lock: boolean }[]>`
-            SELECT pg_try_advisory_lock(${lockKey}::bigint) AS "pg_try_advisory_lock"
-        `;
-        return rows[0]?.pg_try_advisory_lock === true;
-    }
-
-    private async release(lockKey: number): Promise<void> {
-        await this.prisma.$queryRaw`
-            SELECT pg_advisory_unlock(${lockKey}::bigint)
-        `;
-    }
+        await fn();
+      },
+      { timeout: CRON_LOCK_TIMEOUT_MS },
+    );
+  }
 }
+
+/** Teto de duração de um job sob lock. Passou disso, a transação é abortada e o lock solto. */
+const CRON_LOCK_TIMEOUT_MS = 15 * 60 * 1000;
