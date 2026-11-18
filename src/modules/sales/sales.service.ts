@@ -11,6 +11,16 @@ import {
 } from './sale-totals';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { Prisma } from '@prisma/client';
+import { limitesDoDia } from '../../common/utils/datas';
+
+/** Limites do dia de Brasília para o filtro; data inválida vira 400, não 500. */
+function diaDoFiltro(valor: string) {
+  try {
+    return limitesDoDia(valor);
+  } catch {
+    throw new BadRequestException(`Data inválida: ${valor}`);
+  }
+}
 
 @Injectable()
 export class SalesService {
@@ -95,16 +105,14 @@ export class SalesService {
         }
 
         const variedadeId = item.variedadeId || null;
+        const variedade = variedadeId
+          ? produto.variedades.find((v) => v.id === variedadeId)
+          : null;
 
-        if (variedadeId) {
-          const variedade = produto.variedades.find(
-            (v) => v.id === variedadeId,
+        if (variedadeId && !variedade) {
+          throw new NotFoundException(
+            `Variedade com ID ${variedadeId} não encontrada para o produto ${item.produtoId}`,
           );
-          if (!variedade) {
-            throw new NotFoundException(
-              `Variedade com ID ${variedadeId} não encontrada para o produto ${item.produtoId}`,
-            );
-          }
         }
 
         await tx.itemVenda.create({
@@ -162,11 +170,12 @@ export class SalesService {
       ];
     }
     if (dateFrom || dateTo) {
+      // Dia de Brasília (GMT-3), regra do negócio. Antes o início era o
+      // instante recebido (com a hora atual do seletor do app) e o fim, o dia
+      // em UTC — vendas da manhã e das 21h–23h59 saíam do filtro.
       where.data = {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo && {
-          lte: new Date(new Date(dateTo).setHours(23, 59, 59, 999)),
-        }),
+        ...(dateFrom && { gte: diaDoFiltro(dateFrom).inicio }),
+        ...(dateTo && { lte: diaDoFiltro(dateTo).fim }),
       };
     }
 

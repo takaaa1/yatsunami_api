@@ -1,8 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QrParserService } from './qr-parser.service';
 import { CreateExpenseDto } from './dto';
 import { Prisma } from '@prisma/client';
+import { instanteDeHorarioLocal, limitesDoDia } from '../../common/utils/datas';
+
+/**
+ * Data da compra no fuso do negócio (GMT-3): valor sem fuso — da nota fiscal
+ * ou de clientes antigos — é horário de Brasília; só a data vira meio-dia.
+ */
+const dataDaCompra = (valor?: string) => (valor ? instanteDeHorarioLocal(valor) : null);
 
 @Injectable()
 export class ExpensesService {
@@ -11,15 +18,24 @@ export class ExpensesService {
         private readonly qrParserService: QrParserService,
     ) { }
 
-    /** Limites do dia em UTC (params yyyy-MM-dd do app). */
-    private dayStartUtc(value: string): Date {
-        const [y, m, d] = value.split('T')[0].split('-').map(Number);
-        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+    /**
+     * Limites do **dia de Brasília** (params `yyyy-MM-dd` do app). Antes eram
+     * os do dia em UTC, e uma nota das 21h–23h59 caía no dia seguinte.
+     */
+    private diaDoFiltro(value: string) {
+        try {
+            return limitesDoDia(value);
+        } catch {
+            throw new BadRequestException(`Data inválida: ${value}`);
+        }
     }
 
-    private dayEndUtc(value: string): Date {
-        const [y, m, d] = value.split('T')[0].split('-').map(Number);
-        return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999));
+    private inicioDoDia(value: string): Date {
+        return this.diaDoFiltro(value).inicio;
+    }
+
+    private fimDoDia(value: string): Date {
+        return this.diaDoFiltro(value).fim;
     }
 
     async parseQrCode(url: string) {
@@ -33,7 +49,7 @@ export class ExpensesService {
             const nota = await tx.notaDespesa.create({
                 data: {
                     nomeEstabelecimento: notaData.nomeEstabelecimento,
-                    dataCompra: notaData.dataCompra ? new Date(notaData.dataCompra) : null,
+                    dataCompra: dataDaCompra(notaData.dataCompra),
                     valorTotal: notaData.valorTotal,
                     valorTotalSemDesconto: notaData.valorTotalSemDesconto,
                     valorDesconto: notaData.valorDesconto || 0,
@@ -73,8 +89,8 @@ export class ExpensesService {
         }
         if (dateFrom || dateTo) {
             where.dataCompra = {
-                ...(dateFrom && { gte: this.dayStartUtc(dateFrom) }),
-                ...(dateTo && { lte: this.dayEndUtc(dateTo) }),
+                ...(dateFrom && { gte: this.inicioDoDia(dateFrom) }),
+                ...(dateTo && { lte: this.fimDoDia(dateTo) }),
             };
         }
 
@@ -113,7 +129,7 @@ export class ExpensesService {
                 where: { id },
                 data: {
                     nomeEstabelecimento: notaData.nomeEstabelecimento,
-                    dataCompra: notaData.dataCompra ? new Date(notaData.dataCompra) : null,
+                    dataCompra: dataDaCompra(notaData.dataCompra),
                     valorTotal: notaData.valorTotal,
                     valorTotalSemDesconto: notaData.valorTotalSemDesconto,
                     valorDesconto: notaData.valorDesconto || 0,

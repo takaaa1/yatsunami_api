@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { limitesDoMes, mesAnoNoFuso } from '../../common/utils/datas';
 
 /** Mesma regra que `getFormStatus` em `yatsunami_app/app/(tabs)/index.tsx` */
 function classifyProximoPedidoStatus(
@@ -80,14 +81,14 @@ export class DashboardService {
   constructor(private prisma: PrismaService) {}
 
   async getAdminDashboard(filters?: { year?: number; month?: number }) {
-    const now = new Date();
-    const year = filters?.year || now.getFullYear();
-    const month =
-      filters?.month !== undefined ? filters.month : now.getMonth() + 1;
+    // Mês no fuso do negócio (GMT-3). O processo roda em UTC: com
+    // `new Date(ano, mes, 1)` o mês começava às 21:00 do último dia do mês
+    // anterior em Brasília (verificação do review, D2).
+    const hoje = mesAnoNoFuso(new Date());
+    const year = filters?.year || hoje.ano;
+    const month = filters?.month !== undefined ? filters.month : hoje.mes;
 
-    // Calculate start and end dates for the summary
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+    const { inicio: startDate, fim: endDate } = limitesDoMes(year, month);
 
     // 1. Total Vendas (filtered)
     const summaryVendas = await this.prisma.venda.aggregate({
@@ -116,9 +117,7 @@ export class DashboardService {
     });
 
     // 3. Unified History (Last 12 months for chart flexibility)
-    const chartStart = new Date(startDate);
-    chartStart.setFullYear(chartStart.getFullYear() - 1);
-    chartStart.setDate(1);
+    const chartStart = limitesDoMes(year - 1, month).inicio;
 
     const vendasHistory = await this.prisma.venda.groupBy({
       by: ['data'],
@@ -149,8 +148,8 @@ export class DashboardService {
     const unifiedHistory = this.groupByMonthUnified(
       vendasHistory,
       despesasHistory,
-      chartStart,
-      endDate,
+      { ano: year - 1, mes: month },
+      { ano: year, mes: month },
     );
 
     // 4. Contagem de Pedidos Pendentes
@@ -184,10 +183,12 @@ export class DashboardService {
     ]);
 
     const startYear = Math.min(
-      minVenda?.data?.getFullYear() || now.getFullYear(),
-      minDespesa?.dataCompra?.getFullYear() || now.getFullYear(),
+      minVenda?.data ? mesAnoNoFuso(minVenda.data).ano : hoje.ano,
+      minDespesa?.dataCompra
+        ? mesAnoNoFuso(minDespesa.dataCompra).ano
+        : hoje.ano,
     );
-    const endYear = now.getFullYear();
+    const endYear = hoje.ano;
 
     const availableYears: number[] = [];
     for (let y = endYear; y >= startYear; y--) {
@@ -349,22 +350,30 @@ export class DashboardService {
       dataCompra: Date | null;
       _sum: { valorTotal: Prisma.Decimal | null };
     }[],
-    chartStart: Date,
-    chartEnd: Date,
+    de: { ano: number; mes: number },
+    ate: { ano: number; mes: number },
   ) {
     const result: Record<string, { revenue: number; expenses: number }> = {};
+    // Mês de cada lançamento no fuso de Brasília, não no do processo (UTC).
+    const chave = (instante: Date) => {
+      const { ano, mes } = mesAnoNoFuso(new Date(instante));
+      return `${mes}/${ano}`;
+    };
 
-    // Initialize all months in the range
-    const current = new Date(chartStart);
-    while (current <= chartEnd) {
-      const key = `${current.getMonth() + 1}/${current.getFullYear()}`;
-      result[key] = { revenue: 0, expenses: 0 };
-      current.setMonth(current.getMonth() + 1);
+    // Todos os meses do intervalo, mesmo os sem lançamento.
+    for (
+      let i = de.ano * 12 + (de.mes - 1);
+      i <= ate.ano * 12 + (ate.mes - 1);
+      i++
+    ) {
+      result[`${(i % 12) + 1}/${Math.floor(i / 12)}`] = {
+        revenue: 0,
+        expenses: 0,
+      };
     }
 
     vendas.forEach((item) => {
-      const date = new Date(item.data);
-      const key = `${date.getMonth() + 1}/${date.getFullYear()}`;
+      const key = chave(item.data);
       if (result[key]) {
         result[key].revenue += Number(item._sum.total || 0);
       }
@@ -374,8 +383,7 @@ export class DashboardService {
       // `dataCompra` é anulável: sem data não há mês para agregar.
       // (antes, `new Date(null)` virava 1970 e caía fora do range)
       if (!item.dataCompra) return;
-      const date = new Date(item.dataCompra);
-      const key = `${date.getMonth() + 1}/${date.getFullYear()}`;
+      const key = chave(item.dataCompra);
       if (result[key]) {
         result[key].expenses += Number(item._sum.valorTotal || 0);
       }
@@ -401,8 +409,10 @@ export class DashboardService {
   ) {
     const months: Record<string, number> = {};
     data.forEach((item) => {
-      const date = new Date(item[dateField] as string | Date);
-      const monthYear = `${date.getMonth() + 1}/${date.getFullYear()}`;
+      const { ano, mes } = mesAnoNoFuso(
+        new Date(item[dateField] as string | Date),
+      );
+      const monthYear = `${mes}/${ano}`;
       if (!months[monthYear]) {
         months[monthYear] = 0;
       }
