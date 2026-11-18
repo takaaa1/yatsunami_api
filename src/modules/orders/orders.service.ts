@@ -25,6 +25,7 @@ import { CRON_LOCK_KEYS } from '../../common/runtime/runtime.config';
 
 import { generateOrderCode } from '../../common/utils/string-utils';
 import { Prisma } from '@prisma/client';
+import { nomesDoItem } from '../../common/utils/nomes-do-item';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
@@ -276,6 +277,8 @@ export class OrdersService {
         variedadeId: item.variedadeId,
         quantidade: item.quantidade,
         precoUnitario: precoUnitario, // Store historical price
+        // Cópia dos nomes do momento: histórico concreto (review, D1).
+        ...nomesDoItem(produto, item.variedadeId),
       };
     });
 
@@ -373,6 +376,8 @@ export class OrdersService {
                 variedadeId: item.variedadeId,
                 quantidade: item.quantidade,
                 precoUnitario: item.precoUnitario,
+                produtoNome: item.produtoNome,
+                variedadeNome: item.variedadeNome,
               })),
             },
           },
@@ -406,6 +411,8 @@ export class OrdersService {
               variedadeId: item.variedadeId,
               quantidade: item.quantidade,
               precoUnitario: item.precoUnitario,
+              produtoNome: item.produtoNome,
+              variedadeNome: item.variedadeNome,
             })),
           },
         },
@@ -857,6 +864,8 @@ export class OrdersService {
       variedadeId: number | null | undefined;
       quantidade: number;
       precoUnitario: number;
+      produtoNome: Prisma.InputJsonValue;
+      variedadeNome: Prisma.InputJsonValue | typeof Prisma.DbNull;
     }[] = [];
 
     // If items are being updated, recalculate everything
@@ -902,6 +911,8 @@ export class OrdersService {
           variedadeId: item.variedadeId,
           quantidade: item.quantidade,
           precoUnitario: precoUnitario,
+          // Cópia dos nomes do momento: histórico concreto (review, D1).
+          ...nomesDoItem(produto, item.variedadeId),
         };
       });
 
@@ -965,6 +976,8 @@ export class OrdersService {
                 variedadeId: item.variedadeId,
                 quantidade: item.quantidade,
                 precoUnitario: item.precoUnitario,
+                produtoNome: item.produtoNome,
+                variedadeNome: item.variedadeNome,
               })),
             },
           },

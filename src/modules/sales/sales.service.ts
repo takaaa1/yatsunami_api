@@ -120,6 +120,12 @@ export class SalesService {
             vendaId: venda.id,
             produtoId: item.produtoId,
             variedadeId,
+            // Cópia dos nomes no momento da venda: o histórico não muda quando
+            // o catálogo muda (verificação do review, D1).
+            produtoNome: produto.nome as Prisma.InputJsonValue,
+            variedadeNome:
+              (variedade?.nome as Prisma.InputJsonValue | undefined) ??
+              Prisma.DbNull,
             quantidade: item.quantidade,
             precoUnitario: item.precoUnitario,
             tipoDesconto: item.tipoDesconto || null,
