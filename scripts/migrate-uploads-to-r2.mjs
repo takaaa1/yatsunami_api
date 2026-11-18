@@ -15,16 +15,19 @@
  * Ordem recomendada:
  *   1. dry-run
  *   2. --execute (upload + BD)
- *   3. STORAGE_BACKEND=r2 no .env + pm2 restart
+ *   3. STORAGE_BACKEND=r2 no .env + FORCE_DEPLOY=true ./deploy.sh (recria os slots)
  *   4. EXPO_PUBLIC_UPLOADS_ORIGIN no app (EAS Update)
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { dirname, join, relative } from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { PrismaClient } from '@prisma/client';
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// Regras de chave compartilhadas com o teste (src/infra/migracao-r2.spec.ts).
+const { chaveCanonica, novaUrl } = createRequire(import.meta.url)('./lib/r2-keys.cjs');
 const root = join(__dirname, '..');
 
 function loadEnvFile(envPath) {
@@ -93,7 +96,8 @@ function walkFiles(dir, base = dir) {
         } else if (st.isFile()) {
             out.push({
                 abs: full,
-                key: relative(base, full).replace(/\\/g, '/'),
+                // Mesma chave que a URL reescrita usa (products/ → produtos/).
+                key: chaveCanonica(relative(base, full)),
                 size: st.size,
             });
         }
@@ -103,35 +107,6 @@ function walkFiles(dir, base = dir) {
 
 function publicUrlForKey(key) {
     return `${publicBase}/${key.replace(/^\//, '')}`;
-}
-
-/** Normaliza URL antiga para chave R2 (ex.: produtos/uuid.png). */
-function urlToObjectKey(url) {
-    if (!url?.trim()) return null;
-    const u = url.trim().split('?')[0];
-
-    if (publicBase && u.startsWith(publicBase)) {
-        return u.slice(publicBase.length).replace(/^\//, '');
-    }
-
-    for (const marker of ['/uploads/', '/api/uploads/']) {
-        const idx = u.indexOf(marker);
-        if (idx !== -1) {
-            let rest = u.slice(idx + marker.length);
-            if (rest.startsWith('products/')) {
-                rest = `produtos/${rest.slice('products/'.length)}`;
-            }
-            return rest;
-        }
-    }
-
-    return null;
-}
-
-function rewriteUrl(oldUrl) {
-    const key = urlToObjectKey(oldUrl);
-    if (!key) return null;
-    return publicUrlForKey(key);
 }
 
 async function objectExists(key) {
@@ -162,8 +137,16 @@ async function main() {
     console.log('publicBase:', publicBase);
     console.log('');
 
+    if (!existsSync(uploadsRoot)) {
+        console.error(`ERRO: pasta de uploads ${uploadsRoot} não existe; nada foi alterado.`);
+        process.exit(1);
+    }
     const files = walkFiles(uploadsRoot);
     console.log(`Ficheiros no disco: ${files.length}`);
+
+    // Chaves que estão (ou, no dry-run, estariam) no R2. Só URLs destas chaves
+    // são reescritas no banco — antes a reescrita ignorava falhas de upload.
+    const chavesNoR2 = new Set();
 
     let uploaded = 0;
     let skipped = 0;
@@ -172,18 +155,21 @@ async function main() {
     for (const f of files) {
         const exists = await objectExists(f.key);
         if (exists) {
+            chavesNoR2.add(f.key);
             skipped++;
             if (dryRun) console.log(`[skip R2] ${f.key}`);
             continue;
         }
         if (dryRun) {
             console.log(`[upload] ${f.key} (${f.size} bytes) -> ${publicUrlForKey(f.key)}`);
+            chavesNoR2.add(f.key);
             uploaded++;
             continue;
         }
         try {
             await uploadFile(f.abs, f.key);
             console.log(`OK upload ${f.key}`);
+            chavesNoR2.add(f.key);
             uploaded++;
         } catch (e) {
             console.error(`FAIL upload ${f.key}:`, e.message);
@@ -192,13 +178,18 @@ async function main() {
     }
 
     console.log(`\nUploads: ${uploaded} novos, ${skipped} já no R2, ${failed} falhas`);
+    if (failed > 0 && !dryRun) {
+        console.error('ERRO: houve falhas de upload; o banco NÃO foi alterado. Corrija e rode de novo.');
+        process.exit(1);
+    }
 
     const prisma = new PrismaClient();
     const stats = { usuario: 0, produto: 0, variedadeProduto: 0, pedidoEncomenda: 0, skipped: 0 };
 
     async function updateUrl(table, id, field, oldUrl) {
-        const next = rewriteUrl(oldUrl);
-        if (!next || next === oldUrl) {
+        // null = não é de upload, já é do R2, ou o objeto não está no R2.
+        const next = novaUrl(oldUrl, publicBase, chavesNoR2);
+        if (!next) {
             stats.skipped++;
             return;
         }
@@ -255,7 +246,7 @@ async function main() {
     if (dryRun) {
         console.log('\nNada foi alterado. Corra com --execute para aplicar.');
     } else {
-        console.log('\nPróximo passo: STORAGE_BACKEND=r2 no .env e pm2 restart yatsunami-api');
+        console.log('\nPróximo passo: STORAGE_BACKEND=r2 no .env e FORCE_DEPLOY=true ./deploy.sh');
     }
 }
 
