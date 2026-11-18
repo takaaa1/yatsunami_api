@@ -7,6 +7,8 @@ import {
   ValidateNested,
   IsEnum,
   IsDate,
+  IsPositive,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -33,12 +35,14 @@ export class CreateSaleItemDto {
   @ApiProperty()
   @Type(() => Number)
   @IsNumber()
+  @IsPositive()
   @IsNotEmpty()
   quantidade: number;
 
   @ApiProperty()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   @IsNotEmpty()
   precoUnitario: number;
 
@@ -85,6 +89,7 @@ export class CreateSaleDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
   taxaEntrega?: number;
 
   @ApiProperty({
