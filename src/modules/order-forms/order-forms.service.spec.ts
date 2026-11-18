@@ -291,4 +291,37 @@ describe('OrderFormsService — concluir e reabrir', () => {
       expect(prisma.produtoEncomenda.createMany).not.toHaveBeenCalled();
     });
   });
+  /**
+   * Code review 2026-11: o índice único é `(data_encomenda_id, produto_id,
+   * variedade_id)`, e o PostgreSQL trata NULLs como distintos — o mesmo
+   * produto sem variedade podia entrar duas vezes no formulário. Em vez do
+   * índice parcial sugerido (que hoje quebraria a edição de produtos, ver o
+   * relatório da verificação), as seleções repetidas são descartadas aqui.
+   */
+  describe('seleções de produtos', () => {
+    const gravadas = () =>
+      (
+        prisma.produtoEncomenda.createMany.mock.calls[0][0] as {
+          data: { produtoId: number; variedadeId: number | null }[];
+        }
+      ).data.map((d) => [d.produtoId, d.variedadeId]);
+
+    it('não grava o mesmo produto sem variedade duas vezes', async () => {
+      await service.update(7, {
+        selections: [
+          { product_id: 1 },
+          { product_id: 1, variedade_id: undefined },
+          { product_id: 1, variedade_id: 5 },
+          { product_id: 1, variedade_id: 5 },
+          { product_id: 2 },
+        ],
+      } as never);
+
+      expect(gravadas()).toEqual([
+        [1, null],
+        [1, 5],
+        [2, null],
+      ]);
+    });
+  });
 });

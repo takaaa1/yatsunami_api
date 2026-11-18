@@ -15,6 +15,35 @@ import {
 import { diaDeCalendario } from '../../common/utils/datas';
 import { dataDaVendaDoFormulario } from './sale-date';
 
+/**
+ * Linhas de `produtos_encomenda` sem repetição de (produto, variedade).
+ *
+ * O índice único inclui `variedade_id`, e o PostgreSQL trata NULLs como
+ * distintos: o mesmo produto **sem** variedade passava duas vezes. A dedução
+ * fica aqui, e não num índice parcial, porque hoje a edição de produto recria
+ * as variedades e a FK `ON DELETE SET NULL` transforma seleções de variedade em
+ * linhas sem variedade — um índice derrubaria essa edição (code review 2026-11).
+ */
+function selecoesUnicas(
+  dataEncomendaId: number,
+  selections: { product_id: number; variedade_id?: number | null }[],
+) {
+  const vistas = new Set<string>();
+  const linhas: {
+    dataEncomendaId: number;
+    produtoId: number;
+    variedadeId: number | null;
+  }[] = [];
+  for (const s of selections) {
+    const variedadeId = s.variedade_id || null;
+    const chave = `${s.product_id}:${variedadeId ?? '-'}`;
+    if (vistas.has(chave)) continue;
+    vistas.add(chave);
+    linhas.push({ dataEncomendaId, produtoId: s.product_id, variedadeId });
+  }
+  return linhas;
+}
+
 @Injectable()
 export class OrderFormsService {
   private readonly logger = new Logger(OrderFormsService.name);
@@ -69,11 +98,7 @@ export class OrderFormsService {
 
     if (createDto.selections && createDto.selections.length > 0) {
       await this.prisma.produtoEncomenda.createMany({
-        data: createDto.selections.map((s) => ({
-          dataEncomendaId: item.id,
-          produtoId: s.product_id,
-          variedadeId: s.variedade_id || null,
-        })),
+        data: selecoesUnicas(item.id, createDto.selections),
       });
     }
 
@@ -339,11 +364,7 @@ export class OrderFormsService {
 
       if (updateDto.selections.length > 0) {
         await this.prisma.produtoEncomenda.createMany({
-          data: updateDto.selections.map((s) => ({
-            dataEncomendaId: id,
-            produtoId: s.product_id,
-            variedadeId: s.variedade_id || null,
-          })),
+          data: selecoesUnicas(id, updateDto.selections),
         });
       }
     }
