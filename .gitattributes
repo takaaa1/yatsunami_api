@@ -1,0 +1,3 @@
+# Scripts de shell sempre com LF: bash não roda com CRLF (clone no Windows com
+# core.autocrlf=true quebrava o deploy.sh e os testes de src/infra).
+*.sh text eol=lf
