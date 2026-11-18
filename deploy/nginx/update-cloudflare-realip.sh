@@ -21,7 +21,9 @@ fetch() {
 {
   echo "# Gerado por update-cloudflare-realip.sh em $(date -Iseconds). Não editar à mão."
   for url in https://www.cloudflare.com/ips-v4 https://www.cloudflare.com/ips-v6; do
-    fetch "$url" | while read -r cidr; do
+    # `|| [ -n "$cidr" ]`: a lista da Cloudflare não termina em quebra de
+    # linha, e sem isto o `read` descartava a última faixa.
+    fetch "$url" | while read -r cidr || [ -n "$cidr" ]; do
       [ -n "$cidr" ] && echo "set_real_ip_from ${cidr};"
     done
   done

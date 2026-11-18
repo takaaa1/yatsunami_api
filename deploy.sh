@@ -7,9 +7,6 @@ SKIP_PRUNE="${SKIP_PRUNE:-false}"
 API_PROXY_NAME="${API_PROXY_NAME:-yatsunami_api_proxy}"
 API_SLOT_A_NAME="${API_SLOT_A_NAME:-yatsunami_api_a}"
 API_SLOT_B_NAME="${API_SLOT_B_NAME:-yatsunami_api_b}"
-LEGACY_PM2_APP="${LEGACY_PM2_APP:-yatsunami-api}"
-PM2_HOME_VAR="${PM2_HOME:-/var/www/yatsunami/.pm2}"
-PM2_SUDO_USER="${PM2_SUDO_USER:-yatsunami}"
 API_PUBLIC_PORT="${API_PUBLIC_PORT:-3070}"
 API_PORT_A="${API_PORT_A:-3071}"
 API_PORT_B="${API_PORT_B:-3072}"
@@ -23,8 +20,22 @@ UPLOADS_HOST_PATH="${UPLOADS_HOST_PATH:-/var/www/yatsunami/uploads}"
 LOG_ARCHIVE_DIR="${LOG_ARCHIVE_DIR:-/var/www/yatsunami/logs}"
 LOG_ARCHIVE_KEEP="${LOG_ARCHIVE_KEEP:-30}"
 IMAGE_NAME="${IMAGE_NAME:-yatsunami_api:latest}"
+# Marca as imagens deste projeto: a limpeza só apaga as que têm este label.
+IMAGE_LABEL="${IMAGE_LABEL:-br.com.yatsunami.projeto=api}"
+# Teto do cache do BuildKit (compartilhado com os outros projetos da VPS).
+BUILDER_KEEP_STORAGE="${BUILDER_KEEP_STORAGE:-5GB}"
 
 log() { echo "[$(date -Iseconds)] $*"; }
+
+# A VPS hospeda outros projetos (taikonnect, draftpro). `docker image prune -a`
+# sem filtro apagava as imagens deles fora de uso — inclusive a de rollback —,
+# e `docker builder prune` zerava o cache de build de todos (verificado na VPS
+# em 2026-11-18). Agora: só imagens com o label deste projeto, e o cache é
+# aparado até um teto em vez de apagado.
+limpar_imagens_antigas() {
+  docker image prune -a -f --filter "label=${IMAGE_LABEL}"
+  docker builder prune -f --keep-storage "${BUILDER_KEEP_STORAGE}"
+}
 
 DOCKER_ENV_FILE=""
 
@@ -169,6 +180,40 @@ active_upstream_inc_path() {
   echo "${REPO_DIR}/${NGINX_DIR}/runtime/active-upstream.inc"
 }
 
+# Porta do servidor primário (o primeiro `server`) no upstream do proxy.
+proxy_primary_port() {
+  local upstream_inc
+  upstream_inc=$(active_upstream_inc_path)
+  [ -f "$upstream_inc" ] || return 0
+  grep -oE 'server 127\.0\.0\.1:[0-9]+' "$upstream_inc" | head -1 | grep -oE '[0-9]+$' || true
+}
+
+# Se um deploy anterior parou depois de trocar o proxy mas antes de gravar
+# DEPLOY_STATE_FILE, o arquivo aponta para o slot errado — e o próximo deploy
+# trataria o slot que está servindo como standby e o removeria. O proxy é a
+# verdade sobre quem serve: o estado é corrigido a partir dele.
+reconcile_active_slot() {
+  local primary recorded slot
+  primary=$(proxy_primary_port)
+  [ -n "$primary" ] || return 0
+  recorded=$(active_slot)
+  for slot in a b; do
+    if [ "$(slot_port "$slot")" = "$primary" ] && [ "$slot" != "$recorded" ] \
+      && docker ps --format '{{.Names}}' | grep -qx "$(slot_container "$slot")"; then
+      log "AVISO: estado dizia slot ${recorded}, mas o proxy serve o slot ${slot} (:${primary}). Corrigindo o estado."
+      echo "$slot" >"$DEPLOY_STATE_FILE"
+    fi
+  done
+}
+
+# Imagem do slot ativo antes do build. O build move a tag :latest para a versão
+# nova; um rollback que precise recriar o slot antigo subiria a própria versão
+# rejeitada. Fica vazio se o contentor não existir.
+PREVIOUS_IMAGE_ID=""
+capture_previous_image() {
+  PREVIOUS_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$(slot_container "$(active_slot)")" 2>/dev/null || true)
+}
+
 active_backend_inc_path() {
   echo "${REPO_DIR}/${NGINX_DIR}/runtime/active-backend.inc"
 }
@@ -275,7 +320,9 @@ api_http_code() {
   local port="$1"
   local path="${2:-/api}"
   local raw
-  raw=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 \
+  # --max-time: sem ele, uma API que aceita a conexão e não responde prendia o
+  # curl para sempre, e o limite API_HEALTH_MAX_SEC nunca era alcançado.
+  raw=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 \
     "http://127.0.0.1:${port}${path}" 2>/dev/null || true)
   echo "$raw" | tr -d '\r\n' | grep -oE '[0-9]{3}' | tail -1
 }
@@ -291,34 +338,33 @@ api_health_ok() {
 
 wait_for_api_health() {
   local port="$1"
-  local elapsed=0
+  local inicio=$SECONDS
   local code
   log "Aguardando API em 127.0.0.1:${port}/api (até ${API_HEALTH_MAX_SEC}s)..."
-  while [ "$elapsed" -lt "$API_HEALTH_MAX_SEC" ]; do
+  # Prazo de relógio (SECONDS), não soma de `sleep`: o tempo do curl também conta.
+  while [ $((SECONDS - inicio)) -lt "$API_HEALTH_MAX_SEC" ]; do
     code=$(api_http_code "$port" "/api")
     if api_health_ok "$code"; then
-      log "API pronta em :${port} (HTTP ${code}, ${elapsed}s)."
+      log "API pronta em :${port} (HTTP ${code}, $((SECONDS - inicio))s)."
       return 0
     fi
     sleep 2
-    elapsed=$((elapsed + 2))
   done
   log "ERRO: API não respondeu em 127.0.0.1:${port}."
   return 1
 }
 
 wait_for_proxy_health() {
-  local elapsed=0
+  local inicio=$SECONDS
   local code
   log "Aguardando proxy em :${API_PUBLIC_PORT}/api (até ${API_HEALTH_MAX_SEC}s)..."
-  while [ "$elapsed" -lt "$API_HEALTH_MAX_SEC" ]; do
+  while [ $((SECONDS - inicio)) -lt "$API_HEALTH_MAX_SEC" ]; do
     code=$(api_http_code "$API_PUBLIC_PORT" "/api")
     if api_health_ok "$code"; then
-      log "Proxy OK (HTTP ${code}, ${elapsed}s)."
+      log "Proxy OK (HTTP ${code}, $((SECONDS - inicio))s)."
       return 0
     fi
     sleep 2
-    elapsed=$((elapsed + 2))
   done
   log "ERRO: proxy/API não responde em :${API_PUBLIC_PORT} (último HTTP ${code:-?})."
   timeout 10 docker logs "$API_PROXY_NAME" --tail 20 </dev/null 2>/dev/null || true
@@ -398,6 +444,7 @@ archive_container_logs() {
 
 run_api_slot() {
   local slot="$1"
+  local image="${2:-$IMAGE_NAME}"
   local port name
   port=$(slot_port "$slot")
   name=$(slot_container "$slot")
@@ -415,16 +462,8 @@ run_api_slot() {
     -v "${UPLOADS_HOST_PATH}:${UPLOADS_HOST_PATH}" \
     -e "UPLOADS_PATH=${UPLOADS_HOST_PATH}" \
     --restart unless-stopped \
-    "$IMAGE_NAME" \
+    "$image" \
     node dist/main.js
-}
-
-pm2_run() {
-  if [ -n "$PM2_SUDO_USER" ]; then
-    sudo -u "$PM2_SUDO_USER" env PM2_HOME="$PM2_HOME_VAR" "$@"
-  else
-    env PM2_HOME="$PM2_HOME_VAR" "$@"
-  fi
 }
 
 rollback_blue_green() {
@@ -436,7 +475,12 @@ rollback_blue_green() {
   standby_name=$(slot_container "$standby")
   log "ROLLBACK: a repor slot ${active} (:${active_port})..."
   if ! docker ps --format '{{.Names}}' | grep -qx "$active_name"; then
-    run_api_slot "$active"
+    if [ -n "$PREVIOUS_IMAGE_ID" ]; then
+      run_api_slot "$active" "$PREVIOUS_IMAGE_ID"
+    else
+      log "AVISO: imagem anterior desconhecida; o rollback sobe ${IMAGE_NAME}."
+      run_api_slot "$active"
+    fi
     wait_for_api_health "$active_port" || true
   fi
   write_active_backend_inc "$active_port"
@@ -447,27 +491,12 @@ rollback_blue_green() {
   echo "$active" >"$DEPLOY_STATE_FILE"
 }
 
-migrate_legacy_pm2() {
-  if docker ps --format '{{.Names}}' | grep -qx "$API_PROXY_NAME"; then
-    return 0
-  fi
-  if ! pm2_run pm2 describe "$LEGACY_PM2_APP" >/dev/null 2>&1; then
-    return 0
-  fi
-  log "Migração única: PM2 ${LEGACY_PM2_APP} → blue/green Docker..."
-  pm2_run pm2 delete "$LEGACY_PM2_APP" 2>/dev/null || true
-  pm2_run pm2 save 2>/dev/null || true
-  run_api_slot "a"
-  wait_for_api_health "$API_PORT_A"
-  ensure_api_proxy "$API_PORT_A"
-  wait_for_proxy_health
-  echo "a" >"$DEPLOY_STATE_FILE"
-  log "Migração PM2 concluída; tráfego em :${API_PUBLIC_PORT} → slot a (:${API_PORT_A})."
-}
+# A migração única PM2 → Docker (`migrate_legacy_pm2`) foi removida: conferido
+# na VPS em 2026-11-18 que não há mais PM2 da Yatsunami (sem daemon, sem dump;
+# a API roda só nos contentores blue/green). Achado #0 do code review.
 
 deploy_api_blue_green() {
   log "Deploy blue/green (proxy :${API_PUBLIC_PORT}, slots :${API_PORT_A}/:${API_PORT_B})..."
-  migrate_legacy_pm2
 
   local active standby active_port standby_port active_name standby_name
   local active_was_running=0
@@ -523,6 +552,13 @@ deploy_api_blue_green() {
     rollback_blue_green "$active" "$active_port" "$standby"
     exit 1
   }
+  # Sem o backup no upstream, o proxy já não cai no slot antigo. Antes de
+  # remover o slot antigo, confirmar que o novo responde direto e pelo proxy —
+  # as checagens anteriores podiam ter sido respondidas pelo backup.
+  if ! wait_for_api_health "$standby_port" || ! wait_for_proxy_health; then
+    rollback_blue_green "$active" "$active_port" "$standby"
+    exit 1
+  fi
 
   if [ "$active_was_running" = "1" ]; then
     log "A remover slot antigo ${active_name}..."
@@ -566,8 +602,18 @@ else
   git reset --hard "origin/$BRANCH"
 fi
 
+# proxy.conf tem a porta pública fixa; API_PUBLIC_PORT diferente faria todas as
+# checagens de saúde baterem numa porta onde ninguém escuta.
+if ! grep -qE "listen ${API_PUBLIC_PORT}[ ;]" "${NGINX_DIR}/proxy.conf"; then
+  log "ERRO: API_PUBLIC_PORT=${API_PUBLIC_PORT} não corresponde ao listen de ${NGINX_DIR}/proxy.conf."
+  exit 1
+fi
+
+reconcile_active_slot
+capture_previous_image
+
 log "1/4: docker build ${IMAGE_NAME}..."
-docker build -t "$IMAGE_NAME" .
+docker build -t "$IMAGE_NAME" --label "$IMAGE_LABEL" .
 
 preflight_db_env
 wait_for_postgres
@@ -579,9 +625,8 @@ log "3/4: blue/green API..."
 deploy_api_blue_green
 
 if [ "$SKIP_PRUNE" != "true" ]; then
-  log "4/4: Limpando imagens antigas órfãs e lixo do BuildKit..."
-  docker image prune -a -f
-  docker builder prune -f
+  log "4/4: Limpando imagens antigas deste projeto e aparando o cache do BuildKit..."
+  limpar_imagens_antigas
 fi
 
 log "Estado:"
