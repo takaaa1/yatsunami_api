@@ -1,4 +1,12 @@
-import { diaDeCalendario, instanteLocal, FUSO_DO_NEGOCIO } from './datas';
+import {
+  diaDeCalendario,
+  instanteLocal,
+  FUSO_DO_NEGOCIO,
+  limitesDoDia,
+  limitesDoMes,
+  mesAnoNoFuso,
+  instanteDeHorarioLocal,
+} from './datas';
 
 /**
  * Duas espécies de data, e a diferença decide o fuso.
@@ -59,5 +67,60 @@ describe('instanteLocal', () => {
 
   it('o fuso do negócio é o de São Paulo', () => {
     expect(FUSO_DO_NEGOCIO).toBe('America/Sao_Paulo');
+  });
+});
+
+/**
+ * Datas no fuso de Brasília (GMT-3), regra do negócio: a operação é toda em
+ * Curitiba. O Brasil não tem horário de verão desde 2019, então o
+ * deslocamento é fixo. Verificação do review (D2).
+ */
+describe('fuso de Brasília (GMT-3)', () => {
+  it('limites do dia a partir de AAAA-MM-DD', () => {
+    const { inicio, fim } = limitesDoDia('2026-11-10');
+    expect(inicio.toISOString()).toBe('2026-11-10T03:00:00.000Z');
+    expect(fim.toISOString()).toBe('2026-11-11T02:59:59.999Z');
+  });
+
+  it('aceita ISO completo de builds antigos usando só a parte da data', () => {
+    expect(limitesDoDia('2026-11-10T17:37:00.000Z').inicio.toISOString()).toBe(
+      '2026-11-10T03:00:00.000Z',
+    );
+  });
+
+  it('recusa valor que não começa com data', () => {
+    expect(() => limitesDoDia('ontem')).toThrow();
+  });
+
+  it('limites do mês', () => {
+    const { inicio, fim } = limitesDoMes(2026, 11);
+    expect(inicio.toISOString()).toBe('2026-11-01T03:00:00.000Z');
+    expect(fim.toISOString()).toBe('2026-12-01T02:59:59.999Z');
+  });
+
+  it('mês/ano de um instante no fuso de Brasília (virada do mês)', () => {
+    // 30/11 22:00 em Brasília = 01/12 01:00 UTC: é novembro.
+    expect(mesAnoNoFuso(new Date('2026-12-01T01:00:00Z'))).toEqual({
+      ano: 2026,
+      mes: 11,
+    });
+  });
+
+  it('data/hora sem fuso vinda de fora é lida como horário de Brasília', () => {
+    expect(instanteDeHorarioLocal('2026-02-05T10:32:16').toISOString()).toBe(
+      '2026-02-05T13:32:16.000Z',
+    );
+  });
+
+  it('só a data vira meio-dia de Brasília (não cai no dia vizinho)', () => {
+    expect(instanteDeHorarioLocal('2026-03-01').toISOString()).toBe(
+      '2026-03-01T15:00:00.000Z',
+    );
+  });
+
+  it('valor que já tem fuso é respeitado', () => {
+    expect(
+      instanteDeHorarioLocal('2026-08-14T19:03:03-03:00').toISOString(),
+    ).toBe('2026-08-14T22:03:03.000Z');
   });
 });

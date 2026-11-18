@@ -110,22 +110,22 @@ describe('ExpensesService', () => {
       await service.findAll({ dateTo: '2026-08-21' });
 
       const dataCompra = filtro().dataCompra as { lte: Date };
-      expect(dataCompra.lte.toISOString()).toBe('2026-08-21T23:59:59.999Z');
+      expect(dataCompra.lte.toISOString()).toBe('2026-08-22T02:59:59.999Z');
     });
 
     it('o dia inicial começa à meia-noite', async () => {
       await service.findAll({ dateFrom: '2026-08-01' });
 
       const dataCompra = filtro().dataCompra as { gte: Date };
-      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T03:00:00.000Z');
     });
 
     it('com os dois, monta o intervalo fechado', async () => {
       await service.findAll({ dateFrom: '2026-08-01', dateTo: '2026-08-31' });
 
       const dataCompra = filtro().dataCompra as { gte: Date; lte: Date };
-      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T00:00:00.000Z');
-      expect(dataCompra.lte.toISOString()).toBe('2026-08-31T23:59:59.999Z');
+      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T03:00:00.000Z');
+      expect(dataCompra.lte.toISOString()).toBe('2026-09-01T02:59:59.999Z');
     });
 
     /** O app manda `yyyy-MM-dd`, mas um ISO completo não pode quebrar o corte. */
@@ -133,13 +133,56 @@ describe('ExpensesService', () => {
       await service.findAll({ dateFrom: '2026-08-01T15:30:00.000Z' });
 
       const dataCompra = filtro().dataCompra as { gte: Date };
-      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+      expect(dataCompra.gte.toISOString()).toBe('2026-08-01T03:00:00.000Z');
     });
 
     it('sem datas, não filtra por período', async () => {
       await service.findAll({});
 
       expect(filtro()).not.toHaveProperty('dataCompra');
+    });
+  });
+
+  /**
+   * Regra do negócio (verificação do review, D2): datas em GMT-3 (Curitiba).
+   * O dia do filtro é o de Brasília, e a data gravada sem fuso — vinda da nota
+   * fiscal ou de clientes antigos — é lida como horário de Brasília. Antes o
+   * servidor (em UTC) gravava `2026-03-01T00:00:00` como meia-noite UTC, que
+   * é 28/02 21:00 em Brasília: 50 das 64 notas em produção estavam assim.
+   */
+  describe('fuso de Brasília', () => {
+    // O contentor de produção roda em UTC; a máquina de desenvolvimento, em
+    // Brasília. Sem fixar o fuso, `new Date('…T10:30:00')` acertaria por acaso.
+    const tzOriginal = process.env.TZ;
+    beforeEach(() => {
+      process.env.TZ = 'UTC';
+    });
+    afterEach(() => {
+      process.env.TZ = tzOriginal;
+    });
+
+    it('nota das 22:00 de Brasília entra no próprio dia do filtro', async () => {
+      await service.findAll({ dateFrom: '2026-08-21', dateTo: '2026-08-21' });
+
+      const { gte, lte } = filtro().dataCompra as { gte: Date; lte: Date };
+      const nota = new Date('2026-08-22T01:00:00Z'); // 21/08 22:00 em Brasília
+      expect(nota >= gte && nota <= lte).toBe(true);
+    });
+
+    it.each([
+      ['2026-03-01T10:30:00', '2026-03-01T13:30:00.000Z'],
+      ['2026-03-01', '2026-03-01T15:00:00.000Z'],
+      ['2026-03-01T10:30:00.000Z', '2026-03-01T10:30:00.000Z'],
+    ])('grava %s como %s', async (entrada, esperado) => {
+      await service.create(nota({ dataCompra: entrada }));
+      await service.update(3, nota({ dataCompra: entrada }));
+
+      expect(
+        (gravado(tx.notaDespesa.create).dataCompra as Date).toISOString(),
+      ).toBe(esperado);
+      expect(
+        (gravado(tx.notaDespesa.update).dataCompra as Date).toISOString(),
+      ).toBe(esperado);
     });
   });
 

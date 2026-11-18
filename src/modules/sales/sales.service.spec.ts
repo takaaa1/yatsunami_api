@@ -379,3 +379,61 @@ describe('SalesService.create', () => {
     });
   });
 });
+
+describe('SalesService.findAll — filtro de datas', () => {
+  const tzOriginal = process.env.TZ;
+  let service: SalesService;
+  let venda: { findMany: jest.Mock; count: jest.Mock };
+
+  beforeEach(async () => {
+    // Fuso fora de UTC: é aí que `setHours` (hora local) divergia do parse
+    // de data pura, que o JS faz em UTC.
+    process.env.TZ = 'America/Sao_Paulo';
+    venda = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SalesService,
+        { provide: PrismaService, useValue: { venda } },
+      ],
+    }).compile();
+    service = module.get<SalesService>(SalesService);
+  });
+
+  afterEach(() => {
+    process.env.TZ = tzOriginal;
+  });
+
+  const filtroData = () =>
+    (
+      venda.findMany.mock.calls[0][0] as {
+        where: { data: { gte?: Date; lte?: Date } };
+      }
+    ).where.data;
+
+  // Regra do negócio (verificação do review, D2): o dia é o de Brasília
+  // (GMT-3), independente do fuso do processo.
+  it('dateTo vai até 23:59:59.999 de Brasília', async () => {
+    await service.findAll({ dateTo: '2026-11-10' });
+    expect(filtroData().lte?.toISOString()).toBe('2026-11-11T02:59:59.999Z');
+  });
+
+  it('dateFrom começa à meia-noite de Brasília', async () => {
+    await service.findAll({ dateFrom: '2026-11-10' });
+    expect(filtroData().gte?.toISOString()).toBe('2026-11-10T03:00:00.000Z');
+  });
+
+  it('venda das 22:00 de Brasília fica no próprio dia', async () => {
+    await service.findAll({ dateFrom: '2026-11-10', dateTo: '2026-11-10' });
+    const venda = new Date('2026-11-11T01:00:00Z'); // 10/11 22:00 em Brasília
+    const { gte, lte } = filtroData();
+    expect(gte && lte && venda >= gte && venda <= lte).toBe(true);
+  });
+
+  it('ISO completo de build antigo usa só a parte da data', async () => {
+    await service.findAll({ dateFrom: '2026-11-10T17:37:00.000Z' });
+    expect(filtroData().gte?.toISOString()).toBe('2026-11-10T03:00:00.000Z');
+  });
+});
