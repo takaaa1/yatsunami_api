@@ -9,6 +9,7 @@ import { CreateExpressOrderDto } from './dto/create-express-order.dto';
 import { generateOrderCode } from '../../common/utils/string-utils';
 import { readLocalizedText } from '../../common/utils/localized-text';
 import { Prisma, VariedadePedidoDireto } from '@prisma/client';
+import { nomesDoItem } from '../../common/utils/nomes-do-item';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
@@ -80,6 +81,8 @@ export class ExpressOrdersService {
       quantidade: number;
       precoUnitario: number;
       subtotal: number;
+      produtoNome: Prisma.InputJsonValue;
+      variedadeNome: Prisma.InputJsonValue | typeof Prisma.DbNull;
     }[] = [];
 
     const productIds = [...new Set(dto.itens.map((item) => item.produtoId))];
@@ -155,6 +158,8 @@ export class ExpressOrdersService {
         quantidade: item.quantidade,
         precoUnitario: price,
         subtotal: subtotal,
+        // Cópia dos nomes do momento: histórico concreto (review, D1).
+        ...nomesDoItem(product, item.variedadeId),
       });
     }
 
@@ -368,6 +373,9 @@ export class ExpressOrdersService {
                   precoUnitario: item.precoUnitario,
                   tipoDesconto: null,
                   valorDesconto: 0,
+                  // A venda herda a cópia do pedido, não relê o catálogo.
+                  produtoNome: item.produtoNome ?? Prisma.DbNull,
+                  variedadeNome: item.variedadeNome ?? Prisma.DbNull,
                 })),
               },
             },

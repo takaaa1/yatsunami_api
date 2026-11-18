@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSaleDto, DiscountType } from './dto/create-sale.dto';
+import { Prisma } from '@prisma/client';
 
 /**
  * Aritmética de dinheiro da venda.
@@ -209,6 +210,33 @@ describe('SalesService.create', () => {
   });
 
   describe('produtos e variedades', () => {
+    /**
+     * Histórico concreto (verificação do review, D1): o item guarda o nome do
+     * produto e da variedade no momento da venda, como já guarda o preço.
+     */
+    it('grava no item a cópia do nome do produto e da variedade', async () => {
+      const nomeProduto = { 'pt-BR': 'BENTO', 'ja-JP': '弁当' };
+      const nomeVariedade = { 'pt-BR': 'Grande', 'ja-JP': '大' };
+      tx.produto.findUnique.mockResolvedValue({
+        id: 1,
+        nome: nomeProduto,
+        variedades: [{ id: 9, nome: nomeVariedade }],
+      });
+
+      await venda([item({ variedadeId: 9 }), item()]);
+
+      const dados = tx.itemVenda.create.mock.calls.map(
+        (c) => (c[0] as { data: Record<string, unknown> }).data,
+      );
+      expect(dados[0]).toMatchObject({
+        produtoNome: nomeProduto,
+        variedadeNome: nomeVariedade,
+      });
+      // Sem variedade: NULL no banco (`DbNull`), não o JSON `null`.
+      expect(dados[1].produtoNome).toEqual(nomeProduto);
+      expect(dados[1].variedadeNome).toBe(Prisma.DbNull);
+    });
+
     it('recusa produto inexistente', async () => {
       tx.produto.findUnique.mockResolvedValue(null);
 

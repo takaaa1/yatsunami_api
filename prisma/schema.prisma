@@ -175,6 +175,10 @@ model ItemVenda {
   vendaId       Int               @map("venda_id")
   produtoId     Int               @map("produto_id")
   variedadeId   Int?              @map("variedade_id")
+  /// Nome do produto no momento do pedido/venda (cópia: o catálogo pode mudar).
+  produtoNome   Json?             @map("produto_nome") @db.Json
+  /// Nome da variedade no momento do pedido/venda (cópia: o catálogo pode mudar).
+  variedadeNome Json?             @map("variedade_nome") @db.Json
   quantidade    Int
   precoUnitario Decimal           @map("preco_unitario") @db.Decimal(10, 2)
   tipoDesconto  String?           @map("tipo_desconto") @db.VarChar(20)
@@ -272,6 +276,10 @@ model ItemPedidoEncomenda {
   pedidoId      Int               @map("pedido_id")
   produtoId     Int               @map("produto_id")
   variedadeId   Int?              @map("variedade_id")
+  /// Nome do produto no momento do pedido/venda (cópia: o catálogo pode mudar).
+  produtoNome   Json?             @map("produto_nome") @db.Json
+  /// Nome da variedade no momento do pedido/venda (cópia: o catálogo pode mudar).
+  variedadeNome Json?             @map("variedade_nome") @db.Json
   quantidade    Int
   precoUnitario Decimal?          @map("preco_unitario") @db.Decimal(10, 2)
   pedido        PedidoEncomenda   @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
@@ -364,6 +372,10 @@ model ItemPedidoDireto {
   pedidoId      Int               @map("pedido_id")
   produtoId     Int               @map("produto_id")
   variedadeId   Int?              @map("variedade_id")
+  /// Nome do produto no momento do pedido/venda (cópia: o catálogo pode mudar).
+  produtoNome   Json?             @map("produto_nome") @db.Json
+  /// Nome da variedade no momento do pedido/venda (cópia: o catálogo pode mudar).
+  variedadeNome Json?             @map("variedade_nome") @db.Json
   quantidade    Int
   precoUnitario Decimal           @map("preco_unitario") @db.Decimal(10, 2)
   subtotal      Decimal           @db.Decimal(10, 2)
