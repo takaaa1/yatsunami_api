@@ -16,10 +16,16 @@ export class MailService {
     this.fromName =
       this.configService.get<string>('mail.fromName') || 'Yatsunami';
 
+    const port = this.configService.get<number>('mail.port');
+    // 465 = TLS desde o primeiro byte. Nas demais (587), STARTTLS **obrigatório**:
+    // sem `requireTLS`, um intermediário que apagasse o anúncio de STARTTLS
+    // fazia usuário/senha e o código de redefinição seguirem em texto puro.
+    const tlsImplicito = Number(port) === 465;
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('mail.host'),
-      port: this.configService.get<number>('mail.port'),
-      secure: false, // true for 465, false for other ports
+      port,
+      secure: tlsImplicito,
+      requireTLS: !tlsImplicito,
       auth: {
         user: this.configService.get<string>('mail.user'),
         pass: this.configService.get<string>('mail.password'),

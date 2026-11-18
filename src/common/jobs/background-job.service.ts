@@ -11,10 +11,7 @@ import {
   BackgroundJobStatus,
 } from './background-job.types';
 import { CronLockService } from '../cron/cron-lock.service';
-import {
-  CRON_LOCK_KEYS,
-  isBackgroundJobRuntime,
-} from '../runtime/runtime.config';
+import { isBackgroundJobRuntime } from '../runtime/runtime.config';
 
 const JOB_TTL_MS = 60 * 60 * 1000;
 
@@ -95,30 +92,26 @@ export class BackgroundJobService {
 
   @Cron(CronExpression.EVERY_HOUR)
   purgeExpiredJobs() {
-    void this.cronLockService.withLock(
-      CRON_LOCK_KEYS.BACKGROUND_JOB_PURGE,
-      'purgeExpiredJobs',
-      // Limpeza puramente em memória — sem I/O, logo sem `await`;
-      // `withLock` espera uma função que devolva Promise.
-      () => {
-        const cutoff = Date.now() - JOB_TTL_MS;
-        let removed = 0;
+    // Sem o lock entre instâncias: o `Map` é desta instância, e cada uma
+    // precisa limpar a própria memória (verificação do review, D5).
+    void (() => {
+      const cutoff = Date.now() - JOB_TTL_MS;
+      let removed = 0;
 
-        for (const [id, job] of this.jobs.entries()) {
-          const finishedAt =
-            job.completedAt?.getTime() ?? job.createdAt.getTime();
-          if (finishedAt < cutoff) {
-            this.jobs.delete(id);
-            removed++;
-          }
+      for (const [id, job] of this.jobs.entries()) {
+        // Só jobs terminados, contando o TTL a partir do fim. Apagar um
+        // job ainda em andamento perdia o resultado quando ele terminasse.
+        if (!job.completedAt) continue;
+        if (job.completedAt.getTime() < cutoff) {
+          this.jobs.delete(id);
+          removed++;
         }
+      }
 
-        if (removed > 0) {
-          this.logger.log(`Purged ${removed} expired background job(s)`);
-        }
-        return Promise.resolve();
-      },
-    );
+      if (removed > 0) {
+        this.logger.log(`Purged ${removed} expired background job(s)`);
+      }
+    })();
   }
 
   private async run<TResult>(id: string, fn: () => Promise<TResult>) {

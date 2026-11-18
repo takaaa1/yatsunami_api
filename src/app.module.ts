@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
@@ -10,7 +10,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProductsModule } from './modules/products/products.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { HttpExceptionFilter } from './common/filters';
-import { LoggingInterceptor, TransformInterceptor } from './common/interceptors';
+import { TransformInterceptor } from './common/interceptors';
+import { AccessLogMiddleware } from './common/middleware/access-log.middleware';
 import { CommonModule } from './common/common.module';
 import { OrderFormsModule } from './modules/order-forms/order-forms.module';
 import { ConfiguracoesModule } from './modules/configuracoes/configuracoes.module';
@@ -55,12 +56,16 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
     },
     {
       provide: APP_INTERCEPTOR,
-      useClass: LoggingInterceptor,
-    },
-    {
-      provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  /**
+   * Log de acesso como middleware: roda antes dos guards e vê também as
+   * rejeições 401/403, que o antigo interceptor nunca recebia.
+   */
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(AccessLogMiddleware).forRoutes('{*path}');
+  }
+}
