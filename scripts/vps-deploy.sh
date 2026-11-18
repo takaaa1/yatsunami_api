@@ -8,7 +8,8 @@
 
 set -euo pipefail
 
-REPO_DIR="${VPS_REPO_DIR:-/var/www/yatsunami/api}"
+# REPO_DIR (documentado acima) tem precedência; VPS_REPO_DIR fica por compatibilidade.
+REPO_DIR="${REPO_DIR:-${VPS_REPO_DIR:-/var/www/yatsunami/api}}"
 
 if [ ! -x "${REPO_DIR}/deploy.sh" ]; then
   echo "[$(date -Iseconds)] ERRO: ${REPO_DIR}/deploy.sh não encontrado. Faça git pull."
