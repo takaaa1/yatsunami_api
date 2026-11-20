@@ -136,6 +136,7 @@ model VariedadeProduto {
   tipoProduto            TipoProduto            @default(ITEM) @map("tipo_produto")
   ativo                  Boolean                @default(true)
   imagem                 String?                @db.VarChar(500)
+  abreviacao             String?                @db.VarChar(50)
   criadoEm               DateTime               @default(now()) @map("criado_em") @db.Timestamptz(6)
   atualizadoEm           DateTime               @default(now()) @updatedAt @map("atualizado_em") @db.Timestamptz(6)
   itensPedidoDireto      ItemPedidoDireto[]

@@ -23,6 +23,7 @@ const dadosDaVariedade = (v: CreateVariedadeDto) => ({
   tipoProduto: v.tipoProduto,
   ativo: v.ativo,
   imagem: v.imagem,
+  abreviacao: v.abreviacao,
 });
 
 /**
@@ -81,6 +82,7 @@ export class ProductsService {
               tipoProduto: v.tipoProduto,
               ativo: v.ativo,
               imagem: v.imagem,
+              abreviacao: v.abreviacao,
             })),
           }
         : undefined,
